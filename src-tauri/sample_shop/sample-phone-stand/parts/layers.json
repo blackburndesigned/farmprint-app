@@ -1,0 +1,18 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_stand",
+      "iconStem": "stand",
+      "name": "Stand",
+      "partId": "sample-part-stand-stand",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_pad",
+      "iconStem": "pad",
+      "name": "Pad",
+      "partId": "sample-part-stand-pad",
+      "compositeZ": 1
+    }
+  ]
+}

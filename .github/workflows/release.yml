@@ -1,0 +1,130 @@
+# FarmPrint release build. Triggered by pushing a tag like v0.9.0.
+# Produces a DRAFT GitHub release with installers + updater artifacts (latest.json).
+# After testing the draft, the maintainer publishes the signed artifacts to the releases repo.
+# No Apple / Windows code signing; only Tauri updater signing via secrets.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Read-only by default; only the jobs that create or upload to the release get write.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The tag must match the version in all 5 version files (scripts/version.py), so a release
+  # can never ship installers that report a different version than their tag.
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Tag matches version files
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            python3 scripts/version.py check "${GITHUB_REF#refs/tags/v}"
+          else
+            echo "::error::release.yml must run from a v* tag (got $GITHUB_REF)"; exit 1
+          fi
+
+  # Create ONE draft release up front so every matrix job uploads into it
+  # (otherwise each tauri-action job races to create its own draft).
+  create-release:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - id: create
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `FarmPrint ${tag}`,
+              body: 'Draft build. Test installers before publishing.',
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  build:
+    needs: create-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+          - platform: windows-latest
+            args: --bundles nsis,msi
+            rust_targets: ""
+          - platform: ubuntu-22.04
+            args: --bundles appimage,deb
+            rust_targets: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Linux system deps (WebKitGTK / GTK)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ". -> target"
+
+      # tauri.conf.json has no beforeBuildCommand, so build the frontend here
+      # (frontendDist = ../ui/dist).
+      - name: Build frontend
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: src-tauri
+          tauriScript: npx --yes @tauri-apps/cli@^2
+          # Force updater artifacts on in CI even though tauri.conf.json has false.
+          args: ${{ matrix.args }} --config {"bundle":{"createUpdaterArtifacts":true}}
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          includeUpdaterJson: true

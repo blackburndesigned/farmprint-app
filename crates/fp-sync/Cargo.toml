@@ -1,0 +1,26 @@
+[package]
+name = "fp-sync"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+fp-core = { path = "../fp-core" }
+chrono = { workspace = true }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"], optional = true }
+
+# OS keychain for the shop session (feature `keychain`). Windows Credential Manager only
+# for now: the unsigned Mac app would prompt for Keychain access after every update, so
+# macOS keeps the 0600 session file and does not migrate it. Linux already uses the file
+# (CI needs no D-Bus / Secret Service libraries).
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"], optional = true }
+
+[features]
+default = []
+# Shop session in the Windows Credential Manager (0600 file on Mac and Linux).
+keychain = ["dep:keyring"]
+# Real Supabase REST uploader (store_catalog). Off by default so tests never touch the network.
+supabase = ["dep:reqwest"]

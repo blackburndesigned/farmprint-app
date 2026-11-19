@@ -1,0 +1,11 @@
+[package]
+name = "fp-mesh"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[dependencies]
+base64 = "0.22"
+png = "0.17"
+serde = { version = "1.0", features = ["derive"] }
+zip = { version = "0.6", default-features = false, features = ["deflate"] }

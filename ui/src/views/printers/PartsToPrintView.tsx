@@ -1,0 +1,592 @@
+import React, { useMemo, useState } from "react";
+import { invoke } from "../../tauriInvoke";
+import { Order, OverstockItem, PartUnit, Product, ShopSnapshot } from "../../types";
+import { ProductCompositeThumbnail3D } from "../../components/PartThumbnail3D";
+import { StatusLegendHeader } from "../OrdersAndonViews";
+import { csvText, notifyBanner, notifyError, saveTextFile } from "../../uiFeedback";
+import { PartTile64, type PrintersQueueCommonProps, type SuggestedPrintGroup, isPrinterReadyFirst, prefersLightOnHex } from "./printersShared";
+import { isThumbnailOnlyPart } from "../../partThumbnails";
+
+export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
+  snapshot,
+  onTransition,
+  onSelectUnit,
+  onSnapshotUpdated,
+  showSuggestedGroups = false,
+  onToggleSuggestedGroups,
+}) => {
+  const [localOpen, setLocalOpen] = useState(false);
+  const [productFilter, setProductFilter] = useState<string>("ALL");
+  const [sortMode, setSortMode] = useState<"color" | "order">("order");
+  const isOpen = showSuggestedGroups || localOpen;
+  const setOpen = (v: boolean) => {
+    setLocalOpen(v);
+    onToggleSuggestedGroups?.(v);
+  };
+
+  const productById = useMemo(
+    () => new Map<string, Product>(snapshot.products.map((p) => [p.id, p])),
+    [snapshot.products]
+  );
+  const allUnits = useMemo(
+    () =>
+      snapshot.orders
+        .flatMap((o) => o.lines.flatMap((l) => l.units))
+        .filter((u) => !isThumbnailOnlyPart(u.part_name, productById.get(u.product_id))),
+    [snapshot.orders, productById]
+  );
+  const waitingUnits = useMemo(
+    () =>
+      allUnits.filter(
+        (u) =>
+          (u.state === "Queued" || u.state === "Staged") &&
+          (productFilter === "ALL" || u.product_id === productFilter)
+      ),
+    [allUnits, productFilter]
+  );
+  const orderById = useMemo(
+    () => new Map<string, Order>(snapshot.orders.map((o) => [o.id, o])),
+    [snapshot.orders]
+  );
+  const readyPrinters = useMemo(
+    () =>
+      [...snapshot.printers].sort(
+        (a, b) =>
+          isPrinterReadyFirst(a, allUnits) - isPrinterReadyFirst(b, allUnits) ||
+          a.name.localeCompare(b.name)
+      ),
+    [snapshot.printers, allUnits]
+  );
+
+  const findOverstockMatch = (u: PartUnit): OverstockItem | undefined =>
+    snapshot.overstock.find(
+      (ov) =>
+        ov.quantity > 0 &&
+        ov.product_id === u.product_id &&
+        ov.part_name.toLowerCase() === u.part_name.toLowerCase() &&
+        ov.filament_name.toLowerCase() === u.filament_name.toLowerCase()
+    );
+
+  const handlePullFromOverstock = async (ov: OverstockItem, unit: PartUnit) => {
+    const next = await invoke<ShopSnapshot>("pull_from_overstock", {
+      overstockId: ov.id,
+      unitId: unit.id,
+    });
+    onSnapshotUpdated?.(next);
+  };
+
+  const handleExportQueueCsv = async () => {
+    const csv = csvText([
+      ["Order Code", "Customer", "Product", "Part", "Filament", "State", "Est Minutes"],
+      ...waitingUnits.map((u) => [
+        u.order_code,
+        u.customer_name || "",
+        u.product_name,
+        u.part_name,
+        u.filament_name,
+        u.state,
+        u.print_minutes,
+      ]),
+    ]);
+    try {
+      const path = await saveTextFile("FarmPrint-PartsToPrint.csv", csv);
+      if (path) notifyBanner(`Saved ${waitingUnits.length} parts to ${path}`);
+    } catch (e) {
+      notifyError("The CSV was not saved", e);
+    }
+  };
+
+  const colorGroups: SuggestedPrintGroup[] = useMemo(() => {
+    const map = new Map<string, SuggestedPrintGroup>();
+    for (const u of waitingUnits) {
+      const key = `${u.product_id}::${u.filament_name}::${u.filament_hex}`;
+      const ord = orderById.get(u.order_id);
+      const cust = ord?.customer_name || u.customer_name || u.order_code;
+      const code = ord?.order_code || u.order_code;
+      const ex = map.get(key);
+      if (ex) {
+        ex.units.push(u);
+        if (!ex.customerNames.includes(cust)) ex.customerNames.push(cust);
+        if (!ex.orderCodes.includes(code)) ex.orderCodes.push(code);
+      } else {
+        const matched =
+          readyPrinters.find((p) =>
+            p.loaded_slots.some(
+              (s) => s.filament_name.toLowerCase() === u.filament_name.toLowerCase()
+            )
+          ) ||
+          readyPrinters[0] ||
+          null;
+        map.set(key, {
+          key,
+          filamentName: u.filament_name,
+          filamentHex: u.filament_hex,
+          material: u.filament_material || "PLA",
+          productId: u.product_id,
+          productName: u.product_name,
+          units: [u],
+          customerNames: [cust],
+          orderCodes: [code],
+          suggestedPrinter: matched,
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.units.length - a.units.length);
+  }, [waitingUnits, orderById, readyPrinters]);
+
+  const distinctColors = useMemo(
+    () => new Set(waitingUnits.map((u) => u.filament_name)).size,
+    [waitingUnits]
+  );
+
+  const renderColorCard = (
+    grp: SuggestedPrintGroup,
+    surface: string,
+    closeOnPrint = false
+  ) => {
+    const lightText = prefersLightOnHex(grp.filamentHex);
+    const ovMatch = findOverstockMatch(grp.units[0]);
+    return (
+      <div
+        key={grp.key}
+        style={{
+          background: "rgba(22,27,38,0.94)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 14,
+          padding: 10,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div
+          style={{
+            background: grp.filamentHex,
+            color: lightText ? "#fff" : "#111",
+            borderRadius: 10,
+            padding: "8px 12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13.5,
+                fontWeight: 800,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {grp.filamentName}
+            </div>
+            <div
+              style={{
+                fontSize: 10.5,
+                opacity: 0.86,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {grp.productName}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {ovMatch && (
+              <button
+                type="button"
+                title={`Pull 1 from Overstock (${ovMatch.quantity} available)`}
+                onClick={() => handlePullFromOverstock(ovMatch, grp.units[0])}
+                style={{
+                  padding: "3px 9px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(255,255,255,0.75)",
+                  background: "rgba(48,209,88,0.88)",
+                  color: "#fff",
+                  fontSize: 10.5,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                📦 {ovMatch.quantity} in stock · Pull
+              </button>
+            )}
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "rgba(0,0,0,0.28)",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 800,
+              }}
+            >
+              {grp.units.length}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onTransition({
+                  unit_ids: grp.units.map((u) => u.id),
+                  to_state: "Printing",
+                  printer_id: grp.suggestedPrinter?.id || readyPrinters[0]?.id || null,
+                  actor_device: "Mac Studio (FarmPrint)",
+                  source_surface: surface,
+                  action_label: `Print ${grp.units.length} ${grp.filamentName} on ${grp.suggestedPrinter?.name || "Printer"}`,
+                  failure_reason: null,
+                  failure_note: null,
+                });
+                if (closeOnPrint) setOpen(false);
+              }}
+              style={{
+                padding: "4px 12px",
+                borderRadius: 999,
+                border: "1.5px solid rgba(255,255,255,0.85)",
+                background: "rgba(0,0,0,0.82)",
+                color: "#fff",
+                fontSize: 11.5,
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              Print · {grp.suggestedPrinter?.name || "Send"}
+            </button>
+          </div>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            padding: "2px 4px 4px",
+          }}
+        >
+          {grp.units.map((u) => (
+            <PartTile64
+              key={u.id}
+              unit={u}
+              order={orderById.get(u.order_id)}
+              onTransition={onTransition}
+              onSelectUnit={onSelectUnit}
+              sourceSurface={surface}
+              showOutcomeButtons={false}
+              thumbSize={76}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fp-scroll">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 6,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 800 }}>Parts to Print</div>
+          <div style={{ fontSize: 12, color: "rgba(235,235,245,0.62)" }}>
+            {waitingUnits.length} part(s) across {distinctColors} color(s) left to print
+          </div>
+        </div>
+        <select
+          value={productFilter}
+          onChange={(e) => setProductFilter(e.target.value)}
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            color: "#f8fafc",
+            border: "1px solid rgba(255,255,255,0.14)",
+            borderRadius: 8,
+            padding: "5px 10px",
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          <option value="ALL">All Products</option>
+          {snapshot.products.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <div className="fp-mode-toggle">
+          <button
+            type="button"
+            className={`fp-mode-btn ${sortMode === "order" ? "active" : ""}`}
+            onClick={() => setSortMode("order")}
+          >
+            By Order
+          </button>
+          <button
+            type="button"
+            className={`fp-mode-btn ${sortMode === "color" ? "active" : ""}`}
+            onClick={() => setSortMode("color")}
+          >
+            By Color
+          </button>
+        </div>
+        <div style={{ flex: 1 }} />
+        <button type="button" className="fp-btn fp-btn-sm" onClick={handleExportQueueCsv}>
+          Export CSV
+        </button>
+        <button
+          type="button"
+          className="fp-btn fp-btn-primary"
+          onClick={() => setOpen(true)}
+        >
+          ⎙ Print… ({colorGroups.length} Suggested Groups)
+        </button>
+      </div>
+      <StatusLegendHeader />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+          gap: 12,
+          marginTop: 8,
+        }}
+      >
+        {sortMode === "color"
+          ? colorGroups.map((grp) => renderColorCard(grp, "Parts to Print"))
+          : snapshot.orders
+              .filter((o) =>
+                o.lines.some((l) =>
+                  l.units.some(
+                    (u) =>
+                      !isThumbnailOnlyPart(u.part_name, productById.get(u.product_id)) &&
+                      (u.state === "Queued" || u.state === "Staged") &&
+                      (productFilter === "ALL" || u.product_id === productFilter)
+                  )
+                )
+              )
+              .map((ord) => {
+                const allOrdUnits = ord.lines
+                  .flatMap((l) => l.units)
+                  .filter(
+                    (u) => !isThumbnailOnlyPart(u.part_name, productById.get(u.product_id))
+                  );
+                const ordUnits = allOrdUnits.filter(
+                  (u) =>
+                    (u.state === "Queued" || u.state === "Staged") &&
+                    (productFilter === "ALL" || u.product_id === productFilter)
+                );
+                const line = ord.lines[0];
+                const prod = snapshot.products.find((p) => p.id === line?.product_id);
+                const compositeParts =
+                  prod?.parts.map((pt) => ({
+                    partName: pt.name,
+                    colorHex:
+                      line?.units.find(
+                        (u) => u.part_id === pt.id || u.part_name === pt.name
+                      )?.filament_hex ||
+                      snapshot?.filaments.find((f) => f.id === pt.default_filament_id)?.hex ||
+                      "#1B1D21",
+                    visible: true,
+                  })) ||
+                  allOrdUnits.map((u) => ({
+                    partName: u.part_name,
+                    colorHex: u.filament_hex,
+                    visible: true,
+                  }));
+                const targetPrinter = readyPrinters[0];
+                return (
+                  <div
+                    key={ord.id}
+                    style={{
+                      background: "rgba(22,27,38,0.94)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      borderRadius: 14,
+                      padding: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <ProductCompositeThumbnail3D
+                        productName={line?.product_name || ord.customer_name}
+                        parts={compositeParts}
+                        size={84}
+                        inscriptionText={line?.custom_text}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span style={{ fontSize: 15, fontWeight: 800 }}>
+                            {ord.customer_name}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11.5,
+                              color: "rgba(235,235,245,0.55)",
+                            }}
+                          >
+                            {ord.order_code}
+                          </span>
+                          {ord.is_rush && (
+                            <span className="fp-badge fp-badge-red">RUSH</span>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 700,
+                            color: "#e2e8f0",
+                            marginTop: 2,
+                          }}
+                        >
+                          {line?.product_name}{" "}
+                          {line?.quantity && line.quantity > 1 ? `×${line.quantity}` : ""}
+                        </div>
+                        {line?.custom_text && (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: "#38bdf8",
+                              fontWeight: 600,
+                              marginTop: 2,
+                            }}
+                          >
+                            “{line.custom_text}”
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            marginTop: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span className="fp-badge fp-badge-blue">
+                            {ordUnits.length} of {allOrdUnits.length} parts waiting
+                          </span>
+                          <button
+                            type="button"
+                            className="fp-btn fp-btn-sm fp-btn-primary"
+                            onClick={() =>
+                              onTransition({
+                                unit_ids: ordUnits.map((u) => u.id),
+                                to_state: "Printing",
+                                printer_id: targetPrinter?.id || null,
+                                actor_device: "Mac Studio (FarmPrint)",
+                                source_surface: "Parts to Print",
+                                action_label: `Print Order ${ord.customer_name} on ${targetPrinter?.name || "Printer"}`,
+                                failure_reason: null,
+                                failure_note: null,
+                              })
+                            }
+                          >
+                            Print Order · {targetPrinter?.name || "Send"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 8,
+                        paddingTop: 8,
+                        borderTop: "1px solid rgba(255,255,255,0.07)",
+                      }}
+                    >
+                      {ordUnits.map((u) => {
+                        const ov = findOverstockMatch(u);
+                        return (
+                          <div
+                            key={u.id}
+                            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+                          >
+                            <PartTile64
+                              unit={u}
+                              order={ord}
+                              onTransition={onTransition}
+                              onSelectUnit={onSelectUnit}
+                              sourceSurface="Parts to Print"
+                              showOutcomeButtons={false}
+                            />
+                            {ov && (
+                              <button
+                                type="button"
+                                className="fp-btn fp-btn-sm"
+                                style={{
+                                  height: 19,
+                                  padding: "0 6px",
+                                  fontSize: 9.5,
+                                  background: "rgba(48,209,88,0.22)",
+                                  borderColor: "rgba(48,209,88,0.5)",
+                                  color: "#30d158",
+                                }}
+                                title={`Pull from Overstock (${ov.quantity} in stock)`}
+                                onClick={() => handlePullFromOverstock(ov, u)}
+                              >
+                                📦 Pull ({ov.quantity})
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+      </div>
+      {isOpen && (
+        <div className="fp-modal-backdrop" onClick={() => setOpen(false)}>
+          <div
+            className="fp-modal-window"
+            style={{ width: "min(980px, 92vw)", maxHeight: "86vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="fp-modal-header">
+              <div>
+                <div className="fp-modal-title">
+                  Print — Suggested Groups ({colorGroups.length})
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(235,235,245,0.62)" }}>
+                  Every part still waiting, grouped by filament spool · Ready printers
+                  sorted first: {readyPrinters.map((p) => p.name).join(" → ")}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="fp-btn fp-btn-sm"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div
+              className="fp-modal-body"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {colorGroups.map((grp) => renderColorCard(grp, "Suggested Groups", true))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

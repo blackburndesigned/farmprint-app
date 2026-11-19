@@ -1,0 +1,80 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FarmPrint",
+  "version": "0.9.15",
+  "identifier": "com.blackburndesigned.farmprint",
+  "build": {
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "FarmPrint",
+        "width": 1520,
+        "height": 940,
+        "minWidth": 1180,
+        "minHeight": 740,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: fpcatalog: http://fpcatalog.localhost; connect-src 'self' ipc: http://ipc.localhost fpcatalog: http://fpcatalog.localhost; object-src 'none'; base-uri 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "appimage",
+      "deb"
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Blackburn Designed",
+    "copyright": "\u00a9 Blackburn Designed",
+    "category": "Productivity",
+    "shortDescription": "FarmPrint print farm command center",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENENUUwQUUwMTAzRDdGNUMKUldSY2Z6MFE0QXBlemFoekRYOVFVdCtwZENtZzJJU3BvZm8yN0txNHgyWFRvblg3NjZ2ZVlTcmwK",
+      "endpoints": [
+        "https://github.com/blackburndesigned/farmprint-releases/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_saucer",
+      "iconStem": "saucer",
+      "name": "Saucer",
+      "partId": "sample-part-pot-saucer",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_pot",
+      "iconStem": "pot",
+      "name": "Pot",
+      "partId": "sample-part-pot-pot",
+      "compositeZ": 1
+    }
+  ]
+}

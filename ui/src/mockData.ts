@@ -1,0 +1,33 @@
+import { ShopSnapshot } from "./types";
+
+export const FALLBACK_SNAPSHOT: ShopSnapshot = {
+  filaments: [],
+  products: [],
+  printers: [],
+  orders: [],
+  overstock: [],
+  flow_events: [],
+  analytics: {
+    total_orders: 0,
+    active_orders: 0,
+    ready_to_ship_orders: 0,
+    at_risk_orders: 0,
+    units_queued: 0,
+    units_staged: 0,
+    units_printing: 0,
+    units_printed: 0,
+    units_post_processing: 0,
+    units_ready: 0,
+    total_revenue_cents: 0,
+    total_material_cost_cents: 0,
+    total_reprint_loss_cents: 0,
+    total_reprint_grams: 0,
+    total_net_profit_cents: 0,
+    average_margin_pct: 0,
+    fleet_utilization_pct: 0,
+    estimated_queue_hours: 0,
+    first_pass_yield_pct: 100,
+    failure_by_reason: [],
+    bottlenecks: [],
+  },
+};

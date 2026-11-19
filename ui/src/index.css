@@ -1,0 +1,422 @@
+:root {
+  color-scheme: dark;
+  --bg-canvas: #0b0d12;
+  --bg-panel: #12151e;
+  --bg-card: #171b24;
+  --bg-card-hover: #1d222e;
+  --bg-elevated: #202634;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text-primary: #f8fafc;
+  --text-secondary: rgba(235, 235, 245, 0.68);
+  --text-muted: rgba(235, 235, 245, 0.45);
+  --accent-orange: #ff6a13;
+  --accent-blue: #0a84ff;
+  --accent-green: #30d158;
+  --accent-amber: #ffd60a;
+  --accent-red: #ff453a;
+  --accent-purple: #bf5af2;
+  --ease-spring: cubic-bezier(0.22, 1.08, 0.34, 1);
+  --ease-quick: cubic-bezier(0.2, 1.04, 0.32, 1);
+  --ease-hero: cubic-bezier(0.18, 1.06, 0.3, 1);
+  --ease-pop: cubic-bezier(0.24, 1.12, 0.32, 1);
+  --radius-system: 12px;
+  --radius-card: 10px;
+  --radius-tile: 6px;
+  --fp-wall-scale: 1.06;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #root {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background: var(--bg-canvas); color: var(--text-primary);
+  overflow: hidden; -webkit-font-smoothing: antialiased;
+}
+@keyframes fpFadeSlideUp {
+  from { opacity: 0; transform: translateY(6px) scale(0.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fpModalBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fpModalSpringIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fpPrintPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 214, 10, 0.25); }
+  50% { box-shadow: 0 0 12px 2px rgba(255, 214, 10, 0.42); }
+}
+.fp-shell { display: flex; flex-direction: column; width: 100vw; height: 100vh; background: var(--bg-canvas); }
+/* ContentHeaderRow (44pt height, 6pt/12pt padding) */
+.fp-header-stack { flex-shrink: 0; z-index: 30; }
+.fp-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 44px; padding: 6px 12px; background: rgba(18, 21, 30, 0.94);
+  border-bottom: 1px solid var(--border-subtle); backdrop-filter: blur(20px); gap: 10px; flex-shrink: 0;
+}
+.fp-brand { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.fp-brand-badge, .fp-brand-logo {
+  width: 28px; height: 28px; border-radius: 7px; background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14); display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 11.5px; letter-spacing: -0.03em; color: var(--text-primary);
+}
+.fp-brand-title { font-size: 14px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.fp-brand-sub { font-size: 10.5px; color: var(--text-secondary); line-height: 1.15; }
+.fp-search {
+  display: flex; align-items: center; gap: 6px; min-width: 180px; max-width: 280px; flex: 1;
+  padding: 5px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: border-color 0.22s var(--ease-quick), background 0.22s var(--ease-quick), box-shadow 0.22s var(--ease-quick);
+}
+.fp-search:focus-within {
+  border-color: rgba(10, 132, 255, 0.68); background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.2);
+}
+.fp-search-icon { color: var(--text-muted); font-size: 12px; }
+.fp-search input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 12.5px; }
+.fp-pillbar-inline { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.fp-top-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.fp-mode-toggle {
+  display: inline-flex; padding: 2px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle);
+}
+.fp-mode-btn {
+  padding: 4px 10px; border-radius: 6px; border: none; background: transparent;
+  color: var(--text-secondary); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all 0.22s var(--ease-quick);
+}
+.fp-mode-btn.active { background: rgba(10, 132, 255, 0.24); color: #fff; box-shadow: 0 1px 6px rgba(10, 132, 255, 0.28); }
+/* WallHoverChrome & full-bleed Wall TV layout (BoardChrome.swift + AndonBoardView.swift) */
+.fp-wall-hover-pill {
+  position: fixed; top: 10px; right: 14px; z-index: 250;
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-radius: 12px; background: rgba(14, 17, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(18px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65); opacity: 0.45;
+  transition: opacity 0.2s var(--ease-quick), transform 0.2s var(--ease-quick);
+}
+.fp-wall-hover-pill:hover { opacity: 1; transform: translateY(1px); }
+body.fp-wall-mode .fp-dock-wrap { display: none !important; }
+body.fp-wall-mode .fp-main .fp-scroll {
+  padding-bottom: 18px !important;
+  zoom: var(--fp-wall-scale, 1.06);
+}
+body.fp-wall-mode .fp-main .fp-scroll > div[style*="min-width: 260px"] {
+  flex: 1 1 220px !important;
+  width: auto !important;
+  min-width: 200px !important;
+}
+/* StatusLegendHeader (StatusColorLegend.swift 1:1) */
+.fp-status-legend, .fp-pillbar {
+  display: flex; align-items: center; gap: 14px; padding: 6px 14px;
+  background: rgba(14, 17, 24, 0.9); border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap;
+}
+.fp-legend-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+.fp-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.fp-legend-ring { width: 12px; height: 12px; border-radius: 3px; border: 2.5px solid var(--border-strong); display: inline-block; }
+.fp-legend-label { font-size: 11px; color: var(--text-secondary); }
+.fp-pill, .fp-status-pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;
+  border-radius: 8px; font-size: 11.5px; font-weight: 600;
+  background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary); cursor: pointer; transition: all 0.22s var(--ease-quick);
+}
+.fp-pill:hover, .fp-status-pill:hover { background: rgba(255, 255, 255, 0.09); color: var(--text-primary); }
+.fp-pill.active, .fp-status-pill.active { background: rgba(10, 132, 255, 0.22); border-color: rgba(10, 132, 255, 0.58); color: #fff; }
+.fp-pill-count { padding: 0 5px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); font-size: 10.5px; font-weight: 700; color: var(--text-primary); }
+.fp-pillbar-hint { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* Main & Scroll Containers */
+.fp-main { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.fp-scroll { flex: 1; overflow-y: auto; padding: 14px 16px 96px 16px; animation: fpFadeSlideUp 0.28s var(--ease-spring) both; }
+/* Stacked Shop Order Cards & Grids (OrderCardView.swift 1:1) */
+.fp-order-list { display: flex; flex-direction: column; gap: 12px; }
+.fp-order-grid, .fp-printers-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(264px, 1fr)); gap: 14px; align-items: start; }
+.fp-order-card, .fp-card, .fp-printer-card {
+  background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-card);
+  padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  transition: transform 0.34s var(--ease-spring), border-color 0.22s var(--ease-quick), box-shadow 0.34s var(--ease-spring);
+  animation: fpFadeSlideUp 0.24s var(--ease-spring) both;
+}
+.fp-order-card:hover, .fp-card:hover, .fp-printer-card:hover {
+  border-color: var(--border-strong); transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.38);
+}
+.fp-order-header, .fp-printer-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
+.fp-order-title-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fp-order-number, .fp-printer-name { font-size: 13.5px; font-weight: 700; color: #fff; }
+.fp-order-customer { font-size: 13.5px; font-weight: 700; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-order-meta, .fp-printer-model { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.fp-order-lines { display: flex; flex-direction: column; gap: 8px; }
+.fp-line-row { padding: 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.06); }
+.fp-line-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.fp-line-title { font-size: 12.5px; font-weight: 700; }
+.fp-inscription-pill {
+  padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600;
+  background: rgba(255, 214, 10, 0.14); border: 1px solid rgba(255, 214, 10, 0.4); color: #fde047;
+}
+.fp-parts-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 6px; }
+/* Chrome-free 3D Part Tile & Status Rings (TableTheme.swift + AdaptiveChrome.swift) */
+.fp-part-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  aspect-ratio: 1 / 1; padding: 3px; border-radius: var(--radius-tile);
+  background: rgba(255, 255, 255, 0.025); border: 2.5px solid rgba(148, 163, 184, 0.32);
+  cursor: pointer; position: relative; user-select: none;
+  transition: transform 0.22s var(--ease-quick), border-color 0.2s ease, box-shadow 0.22s var(--ease-quick);
+}
+.fp-part-tile:hover {
+  transform: perspective(480px) translate3d(0, -2px, 8px) scale(1.035);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.42); z-index: 5;
+}
+.fp-part-tile:active { transform: scale(0.97); }
+.fp-part-tile.state-Queued { border-color: rgba(148, 163, 184, 0.42); }
+.fp-part-tile.state-Staged { border-color: #0a84ff; }
+.fp-part-tile.state-Printing { border-color: #ffd60a; animation: fpPrintPulse 2.4s infinite ease-in-out; }
+.fp-part-tile.state-Printed, .fp-part-tile.state-Post-Processing { border-color: #bf5af2; }
+.fp-part-tile.state-Ready, .fp-part-tile.state-Packed, .fp-part-tile.state-Shipped { border-color: #30d158; }
+.fp-part-thumb-box { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.fp-part-color-dot, .fp-spool-dot { width: 10px; height: 10px; border-radius: 999px; border: 1.5px solid rgba(255, 255, 255, 0.7); display: inline-block; flex-shrink: 0; }
+.fp-part-color-dot { position: absolute; right: 2px; bottom: 2px; }
+.fp-part-qty-pill { position: absolute; top: 2px; left: 2px; font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 4px; color: #fff; }
+.fp-part-name, .fp-tile-name { font-size: 10px; font-weight: 600; color: var(--text-primary); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-part-order-name, .fp-part-sub, .fp-tile-sub { font-size: 9.5px; color: var(--text-secondary); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Spools & ANDON */
+.fp-spool-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.fp-spool-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 7px; font-size: 11px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.08); }
+.fp-andon-board { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 12px; padding: 12px 16px 94px 16px; overflow-x: auto; min-height: 0; }
+.fp-andon-col { background: rgba(18, 21, 30, 0.88); border: 1px solid var(--border-subtle); border-radius: var(--radius-system); padding: 10px; display: flex; flex-direction: column; min-height: 0; }
+.fp-andon-col-header { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; font-weight: 700; margin-bottom: 8px; }
+.fp-andon-col-body { flex: 1; overflow-y: auto; }
+/* Badges & Buttons */
+.fp-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+.fp-badge-blue { background: rgba(10, 132, 255, 0.18); color: #64d2ff; border: 1px solid rgba(10, 132, 255, 0.4); }
+.fp-badge-green { background: rgba(48, 209, 88, 0.18); color: #30d158; border: 1px solid rgba(48, 209, 88, 0.4); }
+.fp-badge-amber { background: rgba(255, 214, 10, 0.16); color: #ffd60a; border: 1px solid rgba(255, 214, 10, 0.4); }
+.fp-badge-red { background: rgba(255, 69, 58, 0.18); color: #ff6961; border: 1px solid rgba(255, 69, 58, 0.45); }
+.fp-badge-purple { background: rgba(191, 90, 242, 0.18); color: #da8fff; border: 1px solid rgba(191, 90, 242, 0.4); }
+.fp-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 11px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.13); background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary); cursor: pointer; transition: transform 0.16s var(--ease-quick), background 0.16s ease;
+}
+.fp-btn:hover { background: rgba(255, 255, 255, 0.11); }
+.fp-btn:active { transform: scale(0.97); }
+.fp-btn-sm { padding: 4px 10px; font-size: 11.5px; }
+.fp-btn-ghost { background: transparent; border-color: transparent; }
+.fp-btn-primary { background: #0a84ff; border-color: rgba(100, 210, 255, 0.4); color: #fff; }
+.fp-btn-blue { background: #2563eb; border-color: rgba(147, 197, 253, 0.4); color: #fff; }
+.fp-btn-success, .fp-btn-green { background: rgba(48, 209, 88, 0.2); border-color: rgba(48, 209, 88, 0.5); color: #6ee7b7; }
+.fp-btn-danger { background: rgba(255, 69, 58, 0.18); border-color: rgba(255, 69, 58, 0.48); color: #fca5a5; }
+/* FlipCardPopup / Workbench Tray Modals */
+.fp-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.42); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center; z-index: 200; padding: 28px;
+  animation: fpModalBackdropIn 0.18s ease-out both;
+}
+.fp-modal-window {
+  width: min(94vw, 1180px); max-height: 90vh; background: #131722;
+  border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.72); display: flex; flex-direction: column;
+  overflow: hidden; animation: fpModalSpringIn 0.24s var(--ease-pop) both;
+}
+.fp-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); gap: 10px; }
+.fp-modal-title { font-size: 15px; font-weight: 700; }
+.fp-modal-body { padding: 14px 16px; overflow-y: auto; }
+/* BottomTabBar.swift (18pt corner radius, VStack icon + 10pt bold label, accent 0.22 active) */
+.fp-dock-wrap {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: 8px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 90;
+}
+.fp-dock, .fp-bottom-dock {
+  pointer-events: auto;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 18px;
+  background: rgba(24, 26, 34, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+.fp-dock-item, .fp-dock-btn, .fp-dock-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.fp-dock-item:hover, .fp-dock-btn:hover, .fp-dock-tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+.fp-dock-item.active, .fp-dock-btn.active, .fp-dock-tab.active {
+  background: rgba(10, 132, 255, 0.22);
+  color: #0a84ff;
+}
+.fp-dock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  line-height: 1;
+}
+.fp-dock-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fp-dock-item.active .fp-dock-label, .fp-dock-tab.active .fp-dock-label {
+  font-weight: 700;
+  color: #0a84ff;
+}
+
+/* --- Settings › Appearance Studio (variables set by settingsStore.applyAppearance) --- */
+.fp-shell { position: relative; isolation: isolate; }
+body.fp-has-window-bg .fp-shell { background: transparent; }
+body.fp-has-window-bg .fp-shell::before {
+  content: ""; position: absolute; inset: calc(-1 * var(--fp-window-blur, 0px)); z-index: -1; pointer-events: none;
+  background: var(--fp-window-bg); filter: blur(var(--fp-window-blur, 0px));
+}
+body.fp-has-card-bg { --fp-card-backdrop: blur(var(--fp-card-blur, 0px)); }
+body.fp-has-card-bg .fp-card, body.fp-has-card-bg .fp-printer-card, body.fp-has-card-bg .fp-order-card {
+  background: var(--fp-card-bg); backdrop-filter: blur(var(--fp-card-blur, 0px));
+}
+body.fp-has-tile-bg .fp-part-tile { backdrop-filter: blur(var(--fp-tile-blur, 0px)); }
+body.fp-header-frost .fp-order-card-header {
+  background: var(--fp-header-frost-tint, transparent) !important;
+  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.fp-header-frost .fp-order-card-header { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  body.fp-has-card-bg .fp-card, body.fp-has-card-bg .fp-printer-card, body.fp-has-card-bg .fp-order-card,
+  body.fp-has-tile-bg .fp-part-tile { backdrop-filter: none; }
+  body.fp-has-window-bg .fp-shell::before { filter: none; }
+}
+
+/* --- Brand logo & sidebar navigation --- */
+.fp-brand-logo { height: 28px; max-width: 140px; object-fit: contain; display: block; }
+.fp-brand-mark { font-weight: 900; font-size: 13px; letter-spacing: 0.5px; padding: 2px 6px; }
+.fp-shell.fp-nav-sidebar { flex-direction: row; }
+.fp-shell.fp-nav-sidebar > .fp-shell-column { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.fp-sidebar {
+  width: 196px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px;
+  background: rgba(18, 21, 30, 0.72); border-right: 1px solid var(--border-subtle); overflow-y: auto;
+  backdrop-filter: blur(20px);
+}
+.fp-sidebar-brand { padding: 4px 6px 12px; }
+.fp-sidebar-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; border: none;
+  background: transparent; color: var(--text-secondary); font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.fp-sidebar-item:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.fp-sidebar-item.active { background: rgba(10, 132, 255, 0.22); color: #fff; }
+.fp-sidebar-badge { margin-left: auto; font-size: 10.5px; color: var(--text-muted); }
+.fp-sidebar-spacer { flex: 1; }
+body.fp-wall-mode .fp-sidebar { display: none; }
+.fp-nav-sidebar .fp-scroll { padding-bottom: 24px; }
+body.fp-has-tile-bg { --fp-tile-backdrop: blur(var(--fp-tile-blur, 0px)); }
+.fp-dock .fp-brand-logo { align-self: center; margin: 0 8px 0 4px; }
+
+/* Kitting cards. The native print (WKWebView on macOS) lays the whole document out again at
+   the paper's width, so the print copy of the cards is a portal straight under <body>
+   (.fp-kitting-print-sheet) and everything else is display:none: the app shell and the fixed
+   modal take no space, nothing is wider than the page (no shrink-to-fit), and each card
+   flows statically onto its own page. */
+.fp-kitting-print-sheet {
+  display: none;
+}
+@media print {
+  /* No fixed size: the paper is whatever the print dialog has (Letter by default, A4, ...). */
+  @page {
+    size: auto;
+    margin: 0.5in;
+  }
+  html,
+  body {
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body > *:not(.fp-kitting-print-sheet) {
+    display: none !important;
+  }
+  .fp-kitting-print-sheet {
+    display: block !important;
+    position: static !important;
+    margin: 0;
+    padding: 0;
+  }
+  .fp-kitting-print-sheet,
+  .fp-kitting-print-sheet * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .fp-kitting-part-thumb img {
+    filter: none !important;
+  }
+  /* Pale parts keep a thin dark outline so they show on white paper. */
+  .fp-kitting-part-thumb img.fp-kitting-light {
+    filter: drop-shadow(0 0 1px #555) drop-shadow(0 0 0.5px #555) !important;
+  }
+  /* The product picture: aspect kept, and a thin outline instead of the app's glow. */
+  .fp-kitting-print-sheet .fp-kitting-line-picture img {
+    object-fit: contain !important;
+    filter: drop-shadow(0 0 0.75px rgba(0, 0, 0, 0.6)) !important;
+  }
+  .fp-kitting-print-sheet .fp-kitting-card {
+    position: static !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    /* Fluid: the page's width on any paper; as tall as its content, so it never spills. */
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+    box-sizing: border-box;
+    break-before: auto;
+    page-break-before: auto;
+    break-after: page;
+    page-break-after: always;
+  }
+  .fp-kitting-print-sheet .fp-kitting-card {
+    padding: 0 !important;
+  }
+  .fp-kitting-print-sheet .fp-kitting-lines {
+    gap: 10px !important;
+  }
+  /* A long order flows onto more pages a whole line block at a time. */
+  .fp-kitting-print-sheet .fp-kitting-line {
+    padding: 10px 12px !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .fp-kitting-print-sheet .fp-kitting-footer {
+    margin-top: 10px !important;
+    break-inside: avoid;
+  }
+  .fp-kitting-print-sheet .fp-kitting-card:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}

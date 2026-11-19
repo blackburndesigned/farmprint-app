@@ -1,0 +1,44 @@
+name: check
+on:
+  push:
+    branches: [main, 'check/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ". -> target"
+      - name: Version files agree
+        run: python3 scripts/version.py check
+      - name: Frontend (types + build)
+        run: cd ui && npm ci && npx tsc --noEmit -p . && npm run build
+      # ui/scripts/tests (mesh weld, viewport math, ...). --if-present: a branch cut before the
+      # ui test script existed still passes.
+      - name: Frontend tests
+        run: cd ui && npm run test --if-present
+      # ESLint (ui/eslint.config.js): errors fail the check, warnings are only reported.
+      # --if-present: a branch cut before the lint script existed still passes.
+      - name: Frontend lint
+        run: cd ui && npm run lint --if-present
+      # Every crate's tests (fp-core, fp-sync, fp-mesh, farmprint-app). --all-features turns on
+      # custom-protocol and fp-sync's supabase client, so this debug build also compiles the full
+      # Tauri app (generate_context!, embedded frontend). The release build lives in release.yml.
+      - name: Rust tests (whole workspace)
+        run: cargo test --workspace --all-features

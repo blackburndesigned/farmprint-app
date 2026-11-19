@@ -1,0 +1,27 @@
+target/
+ui/node_modules/
+ui/dist/
+.DS_Store
+._*
+# Updater signing keys must never be committed (keep them in a local updater signing key folder outside the repo).
+fprust-signing/
+*.key
+*.key.pub.bak
+*.pem
+.env
+.env.*
+node_modules/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+shop_session.json
+catalog_publish_preview.json
+*.key.pub
+*fprust-*-private*
+ProductionTracker/
+ui/public/catalog/
+order_thumbs/
+# Tauri regenerates these on every build (tauri-build writes src-tauri/gen/schemas from
+# build.rs); they are only editor autocompletion for capabilities/*.json.
+src-tauri/gen/schemas/
