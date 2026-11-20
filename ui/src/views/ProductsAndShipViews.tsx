@@ -24,6 +24,10 @@ function applyRole(part: CatalogPart, role: PartRole): CatalogPart {
   return { ...part, is_tracked: true, is_color_only: false };
 }
 
+/** Same footprint as the order cards (ShopOrderCard: 284 wide, 256 composite). */
+const PRODUCT_CARD_WIDTH = 284;
+const PRODUCT_CARD_COMPOSITE = 256;
+
 export const ProductsCatalogView: React.FC<{
   products: Product[];
   filaments: FilamentSwatch[];
@@ -84,8 +88,9 @@ export const ProductsCatalogView: React.FC<{
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+          gridTemplateColumns: `repeat(auto-fill, ${PRODUCT_CARD_WIDTH}px)`,
           gap: 14,
+          alignItems: "start",
         }}
       >
         {products.map((prod) => {
@@ -99,6 +104,9 @@ export const ProductsCatalogView: React.FC<{
           const totalMins = trackedParts.reduce((s, p) => s + p.print_minutes, 0);
           const isSelected = selectedProduct?.id === prod.id;
 
+          const partColumns = 3;
+          const tileSide = Math.floor((PRODUCT_CARD_COMPOSITE - (partColumns - 1) * 6) / partColumns);
+
           return (
             <div
               key={prod.id}
@@ -107,6 +115,10 @@ export const ProductsCatalogView: React.FC<{
               aria-label={`${prod.name}. Press Enter to edit.`}
               aria-pressed={isSelected}
               onClick={() => setSelectedProductId(prod.id)}
+              onDoubleClick={() => {
+                setSelectedProductId(prod.id);
+                setEditing(prod);
+              }}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter") {
@@ -136,118 +148,234 @@ export const ProductsCatalogView: React.FC<{
                   else if (choice === "delete") setPendingDelete(prod);
                 });
               }}
-              className="fp-card"
+              className="fp-order-card fp-product-card"
               style={{
+                width: PRODUCT_CARD_WIDTH,
+                padding: 0,
+                gap: 0,
+                borderRadius: 12,
+                overflow: "hidden",
+                background: "var(--fp-card-bg, rgba(30, 32, 38, 0.94))",
+                backdropFilter: "var(--fp-card-backdrop, none)",
+                border: isSelected ? "2px solid #0a84ff" : "1px solid rgba(255, 255, 255, 0.12)",
+                boxShadow: isSelected
+                  ? "0 0 0 3px rgba(10, 132, 255, 0.25), 0 8px 24px rgba(0, 0, 0, 0.45)"
+                  : "0 8px 24px rgba(0, 0, 0, 0.35)",
                 cursor: "pointer",
-                border: isSelected
-                  ? "2px solid #0a84ff"
-                  : "1px solid rgba(255,255,255,0.10)",
                 display: "flex",
                 flexDirection: "column",
-                gap: 10,
+                userSelect: "none",
+                position: "relative",
               }}
             >
+              {/* Header band: same layout as the order card header (name + badge, then code + stat). */}
+              <div
+                className="fp-order-card-header"
+                style={{
+                  padding: "8px 12px 7px",
+                  background: "rgba(255, 255, 255, 0.04)",
+                  borderBottom: "1px solid rgba(255, 255, 255, 0.07)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 13.5,
+                      color: "#f8fafc",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      minWidth: 0,
+                    }}
+                  >
+                    {prod.name}
+                  </div>
+                  <span
+                    title="Price"
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      padding: "1px 7px",
+                      borderRadius: 999,
+                      background: "rgba(48, 209, 88, 0.18)",
+                      color: "#30d158",
+                      flexShrink: 0,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {fmtUsd(prod.price_cents)}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 6,
+                    fontSize: 11,
+                    color: "rgba(235,235,245,0.55)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {prod.sku.trim() || "No SKU"}
+                  </span>
+                  <span style={{ fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                    {trackedParts.length} {trackedParts.length === 1 ? "part" : "parts"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Body: composite, title row with chip, stats, square part tiles, actions. */}
               <div
                 style={{
+                  padding: "10px 14px 12px",
                   display: "flex",
-                  justifyContent: "center",
-                  padding: 8,
-                  borderRadius: 10,
-                  background: "rgba(255,255,255,0.03)",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 8,
                 }}
               >
                 <ProductCompositeThumb
                   productIdOrName={prod.id}
                   parts={compositeParts}
-                  size={220}
+                  size={PRODUCT_CARD_COMPOSITE}
                   liveTint
                 />
-              </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700 }}>{prod.name}</div>
-                  <div style={{ fontSize: 11, color: "rgba(235,235,245,0.55)" }}>
-                    {[prod.sku.trim() ? `SKU: ${prod.sku}` : "", `${trackedParts.length} printed ${trackedParts.length === 1 ? "part" : "parts"}`].filter(Boolean).join(" • ")}
+                <div style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      color: "#e2e8f0",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {totalGrams.toFixed(1)} g · {totalMins}m print
                   </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 800,
-                    color: "#30d158",
-                    background: "rgba(48,209,88,0.14)",
-                    padding: "3px 8px",
-                    borderRadius: 8,
-                  }}
-                >
-                  {fmtUsd(prod.price_cents)}
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: 11.5,
-                  color: "rgba(235,235,245,0.68)",
-                }}
-              >
-                <span>{totalGrams.toFixed(1)} g filament</span>
-                <span>{totalMins}m print time</span>
-                {prod.default_box_name.trim() && <span>Box: {boxLabel(prod.default_box_name)}</span>}
-              </div>
-
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {trackedParts.map((pt) => {
-                  const hex = previewHexByPart.get(pt.id) || "#8E8E93";
-                  return (
-                    <div
-                      key={pt.id}
+                  {prod.default_box_name.trim() && (
+                    <span
+                      title="Default box"
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 5,
-                        padding: "3px 7px",
-                        borderRadius: 6,
-                        background: "rgba(255,255,255,0.05)",
-                        fontSize: 11,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        background: "rgba(255,255,255,0.08)",
+                        color: "rgba(235,235,245,0.7)",
+                        flexShrink: 0,
+                        maxWidth: 120,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                       }}
                     >
-                      <PartThumb
-                        partName={pt.name}
-                        colorHex={hex}
-                        size={22}
-                        productId={prod.id}
-                      />
-                      <span>{pt.name}</span>
-                    </div>
-                  );
-                })}
-              </div>
+                      📦 {boxLabel(prod.default_box_name)}
+                    </span>
+                  )}
+                </div>
 
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="fp-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditing(prod);
-                  }}
-                >
-                  Edit…
-                </button>
-                <button
-                  type="button"
-                  className="fp-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDelete(prod);
-                  }}
-                  style={{ color: "#ff8a80" }}
-                >
-                  Delete…
-                </button>
+                {trackedParts.length > 0 && (
+                  <div
+                    style={{
+                      width: "100%",
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${partColumns}, ${tileSide}px)`,
+                      gap: 6,
+                      justifyContent: "space-between",
+                      marginTop: 2,
+                    }}
+                  >
+                    {trackedParts.map((pt) => {
+                      const hex = previewHexByPart.get(pt.id) || "#8E8E93";
+                      return (
+                        <div
+                          key={pt.id}
+                          title={`${pt.name} · ${pt.grams.toFixed(1)} g · ${pt.print_minutes}m`}
+                          style={{
+                            width: tileSide,
+                            height: tileSide,
+                            borderRadius: 8,
+                            background: "var(--fp-tile-bg, rgba(255,255,255,0.04))",
+                            backdropFilter: "var(--fp-tile-backdrop, none)",
+                            border: "2.5px solid rgba(255,255,255,0.12)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            position: "relative",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <PartThumb
+                            partName={pt.name}
+                            colorHex={hex}
+                            size={Math.max(20, tileSide - 8)}
+                            productId={prod.id}
+                          />
+                          <span
+                            style={{
+                              position: "absolute",
+                              left: 3,
+                              right: 3,
+                              bottom: 3,
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "1px 4px",
+                              borderRadius: 4,
+                              background: "rgba(15,23,42,0.78)",
+                              color: "#e2e8f0",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              textAlign: "center",
+                            }}
+                          >
+                            {pt.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div style={{ width: "100%", display: "flex", gap: 8, marginTop: 2 }}>
+                  <button
+                    type="button"
+                    className="fp-btn fp-btn-sm"
+                    style={{ flex: 1 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditing(prod);
+                    }}
+                  >
+                    Edit…
+                  </button>
+                  <button
+                    type="button"
+                    className="fp-btn fp-btn-sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete(prod);
+                    }}
+                    style={{ color: "#ff8a80" }}
+                  >
+                    Delete…
+                  </button>
+                </div>
               </div>
             </div>
           );
