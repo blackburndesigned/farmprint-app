@@ -11,6 +11,7 @@ mod feedback_url;
 mod logo;
 mod orderthumbs;
 mod sample_shop;
+mod slicer;
 
 use fp_core::{
     CreateCatalogPartInput, CreateOrderInput, CreateProductInput, Product, ShopLedger,
@@ -111,7 +112,13 @@ pub struct SlicerHandoffResult {
     pub snapshot: ShopSnapshot,
     pub plate_path: String,
     pub part_count: usize,
-    pub launched_bambu_studio: bool,
+    /// True when the plate was opened (in the chosen slicer or the default .3mf app).
+    pub slicer_launched: bool,
+    /// The slicer chosen in Settings (Bambu Studio when none is set).
+    pub slicer_name: String,
+    /// True when the chosen slicer didn't start and the computer's default .3mf app
+    /// opened the plate instead.
+    pub opened_with_default_app: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -460,15 +467,16 @@ fn slicer_object_name(unit: &fp_core::PartUnit) -> String {
     }
 }
 
-/// Builds the 3MF plate, writes it to the handoff folder and opens the slicer.
-/// Returns `(plate path, part count, slicer launched)`, or a plain-language reason when
-/// no plate file could be written. Takes no ledger lock.
-fn stage_and_open_bambu_plate(
+/// Builds the 3MF plate, writes it to the handoff folder and opens it in the slicer
+/// chosen in Settings (see `slicer`). Returns `(plate path, part count, how it opened)`,
+/// or a plain-language reason when no plate file could be written. Takes no ledger lock.
+fn stage_and_open_plate(
     units_with_meshes: &[(fp_core::PartUnit, String)],
     meshes: &[fp_mesh::TriangleMesh],
     printer_name: Option<&str>,
     bed: Option<fp_mesh::PlateBed>,
-) -> Result<(String, usize, bool), String> {
+    slicer_choice: &slicer::SlicerChoice,
+) -> Result<(String, usize, Option<slicer::Opened>), String> {
     if units_with_meshes.is_empty() {
         return Err("none of the selected parts were found".to_string());
     }
@@ -518,8 +526,8 @@ fn stage_and_open_bambu_plate(
     std::fs::write(&out_path, bytes)
         .map_err(|e| format!("could not save {}: {e}", out_path.display()))?;
     let path_str = out_path.to_string_lossy().to_string();
-    let launched = launch_bambu_studio(&path_str);
-    Ok((path_str, plate_items.len(), launched))
+    let opened = slicer::open_plate(slicer_choice, &path_str);
+    Ok((path_str, plate_items.len(), opened))
 }
 
 /// Print! handoff without holding the ledger lock while the plate is built and the
@@ -530,8 +538,14 @@ fn print_handoff(
     request: TransitionRequest,
     allow_without_slicer: bool,
 ) -> Result<SlicerHandoffResult, String> {
-    let (units_for_plate, prn_name, bed) = {
+    let (units_for_plate, prn_name, bed, choice) = {
         let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+        let settings = ledger.get_settings().map_err(|e| e.to_string())?;
+        let choice = slicer::slicer_choice(
+            &settings.slicer_app_name,
+            &settings.slicer_bundle_id,
+            &settings.slicer_app_path,
+        );
         let units = ledger
             .units_by_ids(&request.unit_ids)
             .map_err(|e| e.to_string())?;
@@ -545,7 +559,7 @@ fn print_handoff(
             }
             None => (None, None),
         };
-        (units, name, bed)
+        (units, name, bed, choice)
     }; // ledger lock released here
        // Every model is read once, here, outside the ledger lock.
     let meshes = load_unit_meshes(&state.tracker_root, &units_for_plate).map_err(|missing| {
@@ -554,16 +568,18 @@ fn print_handoff(
             missing.join(", ")
         )
     })?;
-    let (plate_path, part_count, launched) = if units_for_plate.is_empty() {
-        (String::new(), 0, false)
+    let (plate_path, part_count, opened) = if units_for_plate.is_empty() {
+        (String::new(), 0, None)
     } else {
-        stage_and_open_bambu_plate(&units_for_plate, &meshes, prn_name.as_deref(), bed).map_err(
+        stage_and_open_plate(&units_for_plate, &meshes, prn_name.as_deref(), bed, &choice).map_err(
             |e| format!("Nothing was sent to the slicer, and nothing was moved to Printing: {e}."),
         )?
     };
-    if !units_for_plate.is_empty() && !launched && !allow_without_slicer {
+    if !units_for_plate.is_empty() && opened.is_none() && !allow_without_slicer {
+        // The UI matches the start of this message to offer "Mark Printing anyway".
         return Err(format!(
-            "Nothing was moved to Printing: the slicer could not be opened. The plate was saved to {plate_path}. Open it in your slicer, then mark the parts Printing."
+            "Nothing was moved to Printing: the slicer could not be opened. {} didn't start, and no app on this computer opened the .3mf file. The plate was saved to {plate_path}. Open it in your slicer, then mark the parts Printing.",
+            choice.label
         ));
     }
     let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
@@ -574,7 +590,9 @@ fn print_handoff(
         snapshot,
         plate_path,
         part_count,
-        launched_bambu_studio: launched,
+        slicer_launched: opened.is_some(),
+        slicer_name: choice.label,
+        opened_with_default_app: opened.map(|o| o.default_app).unwrap_or(false),
     })
 }
 
@@ -676,64 +694,6 @@ fn reveal_in_file_manager(path: &str) -> Result<(), String> {
         Command::new("xdg-open").arg(dir).spawn()
     };
     r.map(|_| ()).map_err(|e| e.to_string())
-}
-
-/// Open a 3MF in Bambu Studio. Returns false if nothing could be launched.
-fn launch_bambu_studio(path: &str) -> bool {
-    use std::process::Command;
-    #[cfg(target_os = "macos")]
-    {
-        // `open` returns once the app was asked to open the file; a missing app fails here.
-        Command::new("open")
-            .args(["-a", "BambuStudio", path])
-            .status()
-            .map(|st| st.success())
-            .unwrap_or(false)
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let mut candidates: Vec<PathBuf> = Vec::new();
-        for var in [
-            "ProgramFiles",
-            "ProgramW6432",
-            "ProgramFiles(x86)",
-            "LOCALAPPDATA",
-        ] {
-            if let Ok(base) = std::env::var(var) {
-                let base = PathBuf::from(base);
-                candidates.push(base.join("Bambu Studio").join("bambu-studio.exe"));
-                candidates.push(
-                    base.join("Programs")
-                        .join("Bambu Studio")
-                        .join("bambu-studio.exe"),
-                );
-            }
-        }
-        if let Some(exe) = candidates.into_iter().find(|c| c.is_file()) {
-            if Command::new(exe).arg(path).spawn().is_ok() {
-                return true;
-            }
-        }
-        // Fallback: the .3mf file association (opens whatever app owns .3mf).
-        Command::new("cmd")
-            .args(["/C", "start", "", path])
-            .spawn()
-            .map(|mut c| c.wait().map(|s| s.success()).unwrap_or(false))
-            .unwrap_or(false)
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        for bin in ["bambu-studio", "BambuStudio"] {
-            if Command::new(bin).arg(path).spawn().is_ok() {
-                return true;
-            }
-        }
-        Command::new("xdg-open")
-            .arg(path)
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    }
 }
 
 fn decode_b64(input: &str) -> Result<Vec<u8>, String> {
@@ -991,6 +951,16 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .or_else(|| args.get("allowWithoutSlicer"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let slicer_label = shop_settings(state)
+                .map(|st| {
+                    slicer::slicer_choice(
+                        &st.slicer_app_name,
+                        &st.slicer_bundle_id,
+                        &st.slicer_app_path,
+                    )
+                    .label
+                })
+                .unwrap_or_else(|_| "Bambu Studio".to_string());
             let result = print_handoff(
                 state,
                 TransitionRequest {
@@ -999,7 +969,7 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                     printer_id,
                     actor_device: actor_device.unwrap_or_else(|| "Mac Studio".to_string()),
                     source_surface: "Print! Slicer Handoff".to_string(),
-                    action_label: "Print! -> Bambu Studio (.3mf)".to_string(),
+                    action_label: format!("Print! -> {slicer_label} (.3mf)"),
                     failure_reason: None,
                     failure_note: None,
                     filament_id: None,
