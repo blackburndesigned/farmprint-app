@@ -6,6 +6,7 @@ import { StatusLegendHeader } from "../OrdersAndonViews";
 import { csvText, notifyBanner, notifyError, saveTextFile } from "../../uiFeedback";
 import { PartTile64, type PrintersQueueCommonProps, type SuggestedPrintGroup, isPrinterReadyFirst, prefersLightOnHex } from "./printersShared";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
+import { useShopSettings } from "../../settingsStore";
 
 export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
   snapshot,
@@ -15,6 +16,8 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
   showSuggestedGroups = false,
   onToggleSuggestedGroups,
 }) => {
+  // Off by default: FarmPrint doesn't pick a printer; Settings › Printers › "Suggest a printer" turns the hint on.
+  const suggestPrinter = !!useShopSettings().suggest_printer;
   const [localOpen, setLocalOpen] = useState(false);
   const [productFilter, setProductFilter] = useState<string>("ALL");
   const [sortMode, setSortMode] = useState<"color" | "order">("order");
@@ -48,14 +51,18 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
     () => new Map<string, Order>(snapshot.orders.map((o) => [o.id, o])),
     [snapshot.orders]
   );
+  // Only used for the optional suggestion hint: among printers that already have the
+  // group's filament loaded, an idle one comes first.
   const readyPrinters = useMemo(
     () =>
-      [...snapshot.printers].sort(
-        (a, b) =>
-          isPrinterReadyFirst(a, allUnits) - isPrinterReadyFirst(b, allUnits) ||
-          a.name.localeCompare(b.name)
-      ),
-    [snapshot.printers, allUnits]
+      suggestPrinter
+        ? [...snapshot.printers].sort(
+            (a, b) =>
+              isPrinterReadyFirst(a, allUnits) - isPrinterReadyFirst(b, allUnits) ||
+              a.name.localeCompare(b.name)
+          )
+        : [],
+    [suggestPrinter, snapshot.printers, allUnits]
   );
 
   const findOverstockMatch = (u: PartUnit): OverstockItem | undefined =>
@@ -109,14 +116,13 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
         if (!ex.customerNames.includes(cust)) ex.customerNames.push(cust);
         if (!ex.orderCodes.includes(code)) ex.orderCodes.push(code);
       } else {
-        const matched =
-          readyPrinters.find((p) =>
-            p.loaded_slots.some(
-              (s) => s.filament_name.toLowerCase() === u.filament_name.toLowerCase()
-            )
-          ) ||
-          readyPrinters[0] ||
-          null;
+        // A suggestion only when a printer really has this filament loaded; never a
+        // fallback to "the first printer". Empty when suggestions are off.
+        const matched = readyPrinters.find((p) =>
+          p.loaded_slots.some(
+            (s) => s.filament_name.toLowerCase() === u.filament_name.toLowerCase()
+          )
+        );
         map.set(key, {
           key,
           filamentName: u.filament_name,
@@ -146,6 +152,8 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
   ) => {
     const lightText = prefersLightOnHex(grp.filamentHex);
     const ovMatch = findOverstockMatch(grp.units[0]);
+    // The hint shows inside Suggested Groups only, and only when the setting is on.
+    const hint = surface === "Suggested Groups" ? grp.suggestedPrinter : undefined;
     return (
       <div
         key={grp.key}
@@ -230,13 +238,15 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
             <button
               type="button"
               onClick={() => {
+                // No printer is preselected unless the user turned the suggestion on;
+                // the "which printer?" picker always asks before anything is sent.
                 onTransition({
                   unit_ids: grp.units.map((u) => u.id),
                   to_state: "Printing",
-                  printer_id: grp.suggestedPrinter?.id || readyPrinters[0]?.id || null,
+                  printer_id: hint?.id || null,
                   actor_device: "Mac Studio (FarmPrint)",
                   source_surface: surface,
-                  action_label: `Print ${grp.units.length} ${grp.filamentName} on ${grp.suggestedPrinter?.name || "Printer"}`,
+                  action_label: `Print ${grp.units.length} ${grp.filamentName}`,
                   failure_reason: null,
                   failure_note: null,
                 });
@@ -253,10 +263,18 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                 cursor: "pointer",
               }}
             >
-              Print · {grp.suggestedPrinter?.name || "Send"}
+              Send…
             </button>
           </div>
         </div>
+        {hint && (
+          <div
+            title={`${hint.name} has ${grp.filamentName} loaded. You still choose the printer when you send.`}
+            style={{ fontSize: 10.5, color: "rgba(235,235,245,0.5)", padding: "0 4px" }}
+          >
+            Suggestion: {hint.name} has this filament loaded
+          </div>
+        )}
         <div
           style={{
             display: "flex",
@@ -398,7 +416,6 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                     colorHex: u.filament_hex,
                     visible: true,
                   }));
-                const targetPrinter = readyPrinters[0];
                 return (
                   <div
                     key={ord.id}
@@ -485,16 +502,16 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                               onTransition({
                                 unit_ids: ordUnits.map((u) => u.id),
                                 to_state: "Printing",
-                                printer_id: targetPrinter?.id || null,
+                                printer_id: null,
                                 actor_device: "Mac Studio (FarmPrint)",
                                 source_surface: "Parts to Print",
-                                action_label: `Print Order ${ord.customer_name} on ${targetPrinter?.name || "Printer"}`,
+                                action_label: `Print Order ${ord.customer_name}`,
                                 failure_reason: null,
                                 failure_note: null,
                               })
                             }
                           >
-                            Print Order · {targetPrinter?.name || "Send"}
+                            Print Order…
                           </button>
                         </div>
                       </div>
@@ -562,8 +579,8 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                   Print — Suggested Groups ({colorGroups.length})
                 </div>
                 <div style={{ fontSize: 12, color: "rgba(235,235,245,0.62)" }}>
-                  Every part still waiting, grouped by filament spool · Ready printers
-                  sorted first: {readyPrinters.map((p) => p.name).join(" → ")}
+                  Every part still waiting, grouped by filament spool · You choose the
+                  printer when you send each group
                 </div>
               </div>
               <button

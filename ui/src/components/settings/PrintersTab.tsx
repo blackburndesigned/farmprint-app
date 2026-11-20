@@ -147,6 +147,16 @@ export const PrintersTab: React.FC<{
           </button>
         </div>
       </Section>
+      <Section
+        title="Printer suggestions"
+        footer="Off (the default): Suggested Groups groups parts by color and you pick the printer each time. On: each group also shows a small grey hint naming a printer that already has that filament loaded, and the printer picker starts on it. Nothing is ever sent without you choosing. Click Save to apply."
+      >
+        <Check
+          label="Suggest a printer"
+          checked={!!settings.suggest_printer}
+          onChange={(v) => patch({ suggest_printer: v })}
+        />
+      </Section>
     </>
   );
 };

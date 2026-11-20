@@ -10,6 +10,8 @@ import {
 } from "./types";
 
 let current: ShopSettings = EMPTY_SHOP_SETTINGS;
+/** True once `current` came from fp-core, so a partial save never writes blank defaults. */
+let loadedFromCore = false;
 let logoDataUrl: string | null = null;
 let logoFor = "";
 const listeners = new Set<() => void>();
@@ -40,9 +42,23 @@ export async function loadShopSettings(): Promise<ShopSettings> {
   try {
     const s = await invoke<ShopSettings>("get_shop_settings");
     setShopSettings(s);
+    loadedFromCore = true;
   } catch {
     setShopSettings(current);
   }
+  return current;
+}
+
+/**
+ * Saves one or two fields outside the Settings window (e.g. the Printers board
+ * view toggle). Starts from the settings loaded from fp-core, never from blank
+ * defaults, and only applies the result once the save succeeded.
+ */
+export async function saveShopSettingsPatch(patch: Partial<ShopSettings>): Promise<ShopSettings> {
+  if (!loadedFromCore) await loadShopSettings();
+  if (!loadedFromCore) throw new Error("Settings haven't loaded yet");
+  const saved = await invoke<ShopSettings>("save_shop_settings", { settings: { ...current, ...patch } });
+  setShopSettings(saved);
   return current;
 }
 

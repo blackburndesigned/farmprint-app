@@ -703,8 +703,9 @@ export default function App() {
               <div className="fp-modal-title">Send {pendingPrint.req.unit_ids.length} part{pendingPrint.req.unit_ids.length === 1 ? "" : "s"} to which printer?</div>
             </div>
             <div className="fp-modal-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {[{ id: "", name: "Unassigned", model: "", status: "" }, ...snapshot.printers].map((p) => (
-                <label key={p.id || "unassigned"} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, cursor: "pointer", background: pendingPrint.printerId === p.id ? "rgba(10,132,255,0.18)" : "transparent" }}>
+              {snapshot.printers.length === 0 && <div style={{ opacity: 0.7, fontSize: 13 }}>Add a printer first, on the Printers tab.</div>}
+              {snapshot.printers.map((p) => (
+                <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, cursor: "pointer", background: pendingPrint.printerId === p.id ? "rgba(10,132,255,0.18)" : "transparent" }}>
                   <input type="radio" name="fp-print-printer" checked={pendingPrint.printerId === p.id} onChange={() => setPendingPrint({ ...pendingPrint, printerId: p.id })} />
                   <span style={{ fontWeight: 600 }}>{p.name}</span>
                   {p.model && <span style={{ opacity: 0.6, fontSize: 12 }}>{p.model}{p.status ? ` · ${p.status}` : ""}</span>}
@@ -712,9 +713,10 @@ export default function App() {
               ))}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
                 <button type="button" className="fp-btn fp-btn-sm" onClick={() => setPendingPrint(null)}>Cancel</button>
-                <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => {
+                <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" disabled={!snapshot.printers.some((p) => p.id === pendingPrint.printerId)} title={snapshot.printers.some((p) => p.id === pendingPrint.printerId) ? undefined : "Pick a printer first"} onClick={() => {
                   const { req, printerId } = pendingPrint;
                   const prn = snapshot.printers.find((p) => p.id === printerId);
+                  if (!prn) return;
                   const label = req.action_label.replace(/ (on|→) [^()]+$/, "");
                   setPendingPrint(null);
                   void runTransition({ ...req, printer_id: printerId || null, action_label: prn ? `${label} on ${prn.name}` : label }, true);

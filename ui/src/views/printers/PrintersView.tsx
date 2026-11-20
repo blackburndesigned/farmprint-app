@@ -1,5 +1,5 @@
 import { FilamentLibrarySheet } from "../../components/FilamentLibrarySheet";
-import { printerAccent } from "../../settingsStore";
+import { printerAccent, saveShopSettingsPatch, useShopSettings } from "../../settingsStore";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoke } from "../../tauriInvoke";
 import { FilamentSwatch, Order, OrderLine, PartUnit, Printer, PrinterSlot, Product, ShopSnapshot } from "../../types";
@@ -8,6 +8,7 @@ import { StatusLegendHeader } from "../OrdersAndonViews";
 import { BedSizeFields, parseBedSize } from "../../components/BedSizeFields";
 import { FAILURE_REASONS, confirmRemovePrinter, notifyError } from "../../uiFeedback";
 import { LANE_COLORS, PartTile64, type PrintersQueueCommonProps, prefersLightOnHex } from "./printersShared";
+import { groupLaneUnits, laneCountLabel } from "./laneGroups";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
 
 export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
@@ -29,6 +30,16 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("0.4");
   const [newPrinterBed, setNewPrinterBed] = useState<{ x: string; y: string }>({ x: "", y: "" });
   const [showFilamentModal, setShowFilamentModal] = useState(false);
+
+  // "By job" (default) shows each batch exactly as it was sent; "By order" splits lanes by order.
+  const settings = useShopSettings();
+  const savedBoardView = settings.printers_board_view === "order" ? "order" : "job";
+  const [boardView, setBoardView] = useState<"job" | "order">(savedBoardView);
+  useEffect(() => { setBoardView(savedBoardView); }, [savedBoardView]);
+  const chooseBoardView = (v: "job" | "order") => {
+    setBoardView(v);
+    saveShopSettingsPatch({ printers_board_view: v }).catch((e) => notifyError("The Printers board view was not saved", e));
+  };
 
   const [failureModalTarget, setFailureModalTarget] = useState<{ unitIds: string[]; label: string } | null>(null);
   const [failureReason, setFailureReason] = useState<string>("Bed Adhesion");
@@ -140,6 +151,12 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
           <button type="button" className={`fp-mode-btn ${!wallMode ? "active" : ""}`} onClick={() => setWallMode(false)}>Work</button>
           <button type="button" className={`fp-mode-btn ${wallMode ? "active" : ""}`} onClick={() => setWallMode(true)}>Wall TV</button>
         </div>
+        {!wallMode && (
+          <div className="fp-mode-toggle" role="group" aria-label="Group printer jobs">
+            <button type="button" className={`fp-mode-btn ${boardView === "job" ? "active" : ""}`} title="Show each batch exactly as it was sent, even when it has parts from several orders" onClick={() => chooseBoardView("job")}>By job</button>
+            <button type="button" className={`fp-mode-btn ${boardView === "order" ? "active" : ""}`} title="Split each printer's parts by order" onClick={() => chooseBoardView("order")}>By order</button>
+          </div>
+        )}
         <div style={{ flex: 1 }} />
         <span className="fp-badge fp-badge-blue">Printers: {localPrinters.length} machines</span>
         <span className="fp-badge fp-badge-green">Active: {activeJobsCount} parts</span>
@@ -212,16 +229,14 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
           {localPrinters.map((printer, idx) => {
             const accent = printerAccent(printer.id) || printer.loaded_slots[0]?.filament_hex || LANE_COLORS[idx % LANE_COLORS.length];
             const laneUnits = allUnits.filter((u) => u.printer_id === printer.id && (u.state === "Printing" || u.state === "Staged"));
-            const byOrder = new Map<string, PartUnit[]>();
-            for (const u of laneUnits) byOrder.set(u.order_id, [...(byOrder.get(u.order_id) || []), u]);
-            const slices = Array.from(byOrder.entries());
+            const slices = groupLaneUnits(laneUnits, boardView);
             const lightText = prefersLightOnHex(accent);
             return (
               <div key={printer.id} style={{ width: 282, flexShrink: 0, display: "flex", flexDirection: "column", borderRadius: 14, background: "rgba(22,27,38,0.92)", border: "1px solid rgba(255,255,255,0.1)", overflow: "hidden" }}>
                 <div style={{ background: accent, color: lightText ? "#fff" : "#111", padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{printer.name}</div>
-                    <div style={{ fontSize: 11, opacity: 0.84 }}>{slices.length} {slices.length === 1 ? "job" : "jobs"} · {laneUnits.length} parts · {laneUnits.some((u) => u.state === "Printing") ? "Printing" : "Idle"}</div>
+                    <div style={{ fontSize: 11, opacity: 0.84 }}>{laneCountLabel(slices, boardView)} · {laneUnits.length} parts · {laneUnits.some((u) => u.state === "Printing") ? "Printing" : "Idle"}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                     <button type="button" title={`Set loaded filament spools on ${printer.name}`} onClick={() => setEditingPrinterSlotsId(printer.id)} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.26)", color: "#fff", cursor: "pointer", fontSize: 12 }}>🎨</button>
@@ -244,27 +259,45 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                   {slices.length === 0 ? (
                     <div style={{ textAlign: "center", fontSize: 12, color: "rgba(235,235,245,0.45)", paddingTop: 18 }}>Idle</div>
                   ) : (
-                    slices.map(([orderId, units]) => {
-                      const ord = orderById.get(orderId);
+                    slices.map(({ key, kind, units }) => {
                       const first = units[0];
+                      const orderIds = Array.from(new Set(units.map((u) => u.order_id)));
+                      // One order in the group: that order's picture and name, as before.
+                      const ord = orderIds.length === 1 ? orderById.get(orderIds[0]) : undefined;
                       const line = ord?.lines.find((l) => l.id === first.line_id) || ord?.lines[0];
                       const totalMins = units.reduce((acc, u) => acc + (u.print_minutes || 0), 0);
+                      const customerOf = (u: PartUnit) => orderById.get(u.order_id)?.customer_name || u.customer_name || u.order_code;
+                      const customers = Array.from(new Set(units.map(customerOf)));
+                      const filaments = Array.from(new Set(units.map((u) => u.filament_name).filter(Boolean)));
+                      const title =
+                        kind === "loose" ? "Loose parts"
+                          : orderIds.length === 1 ? (ord?.customer_name || first.customer_name || first.order_code)
+                          : `Job · ${orderIds.length} orders`;
+                      const subtitle = kind === "order" || orderIds.length === 1
+                        ? `${first.filament_name} · ×${units.length}`
+                        : `${customers.join(" · ")} · ×${units.length}`;
+                      const groupLabel = kind === "order" || (kind === "job" && orderIds.length === 1)
+                        ? (ord?.customer_name || first.order_code)
+                        : kind === "loose" ? "Loose parts" : `Job (${orderIds.length} orders)`;
+                      const tooltip = kind === "loose"
+                        ? "These parts weren't sent as one job (for example older parts), so they're listed together here."
+                        : kind === "job" ? `Sent as one job · ${customers.join(", ")}${filaments.length ? ` · ${filaments.join(", ")}` : ""}` : undefined;
                       return (
-                        <div key={orderId} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 11, padding: 8, display: "flex", flexDirection: "column", gap: 7 }}>
+                        <div key={key} title={tooltip} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 11, padding: 8, display: "flex", flexDirection: "column", gap: 7 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             {renderSliceComposite40(ord, line, first)}
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ord?.customer_name || first.customer_name}</div>
-                              <div style={{ fontSize: 11, color: "rgba(235,235,245,0.62)" }}>{first.filament_name} · ×{units.length}</div>
+                              <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+                              <div style={{ fontSize: 11, color: "rgba(235,235,245,0.62)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subtitle}</div>
                               <div style={{ fontSize: 10.5, fontWeight: 600, color: "#64d2ff" }}>{units.some((u) => u.state === "Printing") ? `Printing ~${Math.max(1, Math.round(totalMins / 60))}h` : "Staged on plate"}</div>
                             </div>
                             <div style={{ display: "flex", gap: 3 }}>
-                              <button type="button" className="fp-btn fp-btn-sm fp-btn-success" style={{ padding: "2px 6px" }} title="Mark plate done" onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: `Done: ${ord?.customer_name || first.order_code}`, failure_reason: null, failure_note: null })}>✓</button>
-                              <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" style={{ padding: "2px 6px" }} title="Mark plate failed" onClick={() => setFailureModalTarget({ unitIds: units.map((u) => u.id), label: `${ord?.customer_name || first.order_code} on ${printer.name}` })}>✕</button>
+                              <button type="button" className="fp-btn fp-btn-sm fp-btn-success" style={{ padding: "2px 6px" }} title="Mark plate done" onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: `Done: ${groupLabel}`, failure_reason: null, failure_note: null })}>✓</button>
+                              <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" style={{ padding: "2px 6px" }} title="Mark plate failed" onClick={() => setFailureModalTarget({ unitIds: units.map((u) => u.id), label: `${groupLabel} on ${printer.name}` })}>✕</button>
                             </div>
                           </div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {units.map((u) => <PartTile64 key={u.id} unit={u} order={ord} onTransition={onTransition} onSelectUnit={onSelectUnit} sourceSurface="Printers" onRequestFailureReason={(ids, lbl) => setFailureModalTarget({ unitIds: ids, label: lbl })} />)}
+                            {units.map((u) => <PartTile64 key={u.id} unit={u} order={orderById.get(u.order_id)} onTransition={onTransition} onSelectUnit={onSelectUnit} sourceSurface="Printers" onRequestFailureReason={(ids, lbl) => setFailureModalTarget({ unitIds: ids, label: lbl })} />)}
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                             <select aria-label="Move job" value="" onChange={(e) => e.target.value && onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printing", printer_id: e.target.value, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: "Moved job to printer", failure_reason: null, failure_note: null })} style={{ background: "rgba(255,255,255,0.06)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, fontSize: 10.5, padding: "2px 6px" }}>
