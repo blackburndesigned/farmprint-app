@@ -122,6 +122,13 @@ export const PART_PLACEHOLDER_SRC =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="14" y="14" width="36" height="36" rx="7" fill="#8e8e93" fill-opacity="0.28" stroke="#8e8e93" stroke-opacity="0.55" stroke-width="2"/></svg>'
   );
 
+/** Fixed `size` square, or (fluid) a square that fills the parent's width up to `size`. */
+export function fitBox(size: number, fluid: boolean): React.CSSProperties {
+  return fluid
+    ? { width: "100%", maxWidth: size, height: "auto", aspectRatio: "1 / 1", minWidth: 0 }
+    : { width: size, height: size };
+}
+
 function swapToPlaceholder(e: { currentTarget: HTMLImageElement }) {
   if (e.currentTarget.src !== PART_PLACEHOLDER_SRC) e.currentTarget.src = PART_PLACEHOLDER_SRC;
 }
@@ -930,7 +937,9 @@ export const ProductCompositeThumb: React.FC<{
   statusHex?: string;
   /** Skip the Settings outline (printed paper keeps its own look). */
   noOutline?: boolean;
-}> = ({ productIdOrName, parts, size = 76, inscriptionText, liveTint = false, renderPx = 240, ghostHidden = false, statusHex, noOutline }) => {
+  /** Shrink with the parent's width, `size` px at most (narrow board lanes). */
+  fluid?: boolean;
+}> = ({ productIdOrName, parts, size = 76, inscriptionText, liveTint = false, renderPx = 240, ghostHidden = false, statusHex, noOutline, fluid = false }) => {
   const R = Math.max(16, Math.min(2048, Math.round(renderPx) || 240));
   // Tinted layers are capped at 256 px; a bigger composite needs bigger layers.
   const tintMax = Math.max(256, R);
@@ -1181,8 +1190,7 @@ export const ProductCompositeThumb: React.FC<{
     return (
       <div
         style={{
-          width: size,
-          height: size,
+          ...fitBox(size, fluid),
           borderRadius: 10,
           background: "rgba(255,255,255,0.04)",
           display: "flex",
@@ -1203,8 +1211,7 @@ export const ProductCompositeThumb: React.FC<{
       width={size}
       height={size}
       style={{
-        width: size,
-        height: size,
+        ...fitBox(size, fluid),
         objectFit: "contain",
         filter:
           "drop-shadow(0 1px 1px rgba(255,255,255,0.45)) drop-shadow(0 4px 10px rgba(0,0,0,0.55))",
