@@ -1009,6 +1009,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "png 0.17.16",
+ "quick-xml",
  "serde",
  "zip 0.6.6",
 ]

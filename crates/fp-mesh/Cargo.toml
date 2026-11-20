@@ -9,3 +9,7 @@ base64 = "0.22"
 png = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+# Checks the plate's XML files are well-formed (already in the lockfile via Tauri).
+quick-xml = "0.42"

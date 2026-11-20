@@ -735,7 +735,15 @@ fn parse_single_3mf_model(xml: &str) -> ParsedThreeMFModel {
 fn extract_attr<'a>(tag: &'a str, key: &str) -> Option<&'a str> {
     for quote in ['"', '\''] {
         let pattern = format!("{}={}", key, quote);
-        if let Some(pos) = tag.find(&pattern) {
+        // Only a whole attribute name counts: `id` must not match inside `pid` or `objectid`.
+        for (pos, _) in tag.match_indices(&pattern) {
+            let starts_attr = tag[..pos]
+                .chars()
+                .next_back()
+                .is_none_or(|c| c.is_whitespace());
+            if !starts_attr {
+                continue;
+            }
             let start = pos + pattern.len();
             let rest = &tag[start..];
             if let Some(end) = rest.find(quote) {
@@ -798,13 +806,208 @@ impl Default for PlateBed {
     }
 }
 
+/// A filament loaded on the chosen printer (AMS, MMU or tool head). `slot` is the number
+/// FarmPrint shows ("Slot 3"), 1-based, and becomes the filament number in the slicer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlateSlot {
+    pub slot: u32,
+    pub filament_id: String,
+    pub filament_hex: String,
+    pub material: String,
+}
+
+/// Which filament swatch a plate item is printed in. `PlateOptions::item_filaments[i]`
+/// belongs to `items[i]`; an empty id means "match by color only".
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlateItemFilament {
+    pub filament_id: String,
+    pub material: String,
+}
+
+/// Everything about the target printer the plate writer can use. `Default` is "nothing
+/// known": the 220 mm default bed, no loaded slots, colors matched by hex only.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlateOptions {
+    pub bed: PlateBed,
+    /// The chosen printer's loaded slots. Empty when no printer was picked or it has none.
+    pub loaded_slots: Vec<PlateSlot>,
+    /// Swatch identity per item, index-aligned with the items. Missing entries match by hex.
+    pub item_filaments: Vec<PlateItemFilament>,
+}
+
+impl From<PlateBed> for PlateOptions {
+    fn from(bed: PlateBed) -> Self {
+        PlateOptions {
+            bed,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<Option<PlateBed>> for PlateOptions {
+    fn from(bed: Option<PlateBed>) -> Self {
+        bed.map(PlateOptions::from).unwrap_or_default()
+    }
+}
+
+/// One filament the plate uses, as the slicer will number it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateFilament {
+    /// 1-based filament / extruder number in the slicer.
+    pub number: u32,
+    /// `#RRGGBB`, upper case.
+    pub hex: String,
+    /// "PLA" when unknown.
+    pub material: String,
+    /// True when it came from a loaded printer slot (then `number` is that slot).
+    pub from_slot: bool,
+}
+
+/// `#RRGGBB` upper case, or None when `hex` isn't a 6-digit color (`#RGB`, `RRGGBBAA` and a
+/// missing `#` are accepted).
+pub fn normalize_hex(hex: &str) -> Option<String> {
+    let clean = hex.trim().trim_start_matches('#');
+    let six: String = match clean.len() {
+        3 => clean.chars().flat_map(|c| [c, c]).collect(),
+        6 | 8 => clean[..6].to_string(),
+        _ => return None,
+    };
+    if six.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(format!("#{}", six.to_ascii_uppercase()))
+    } else {
+        None
+    }
+}
+
+/// Neutral grey for a plate item with no usable color.
+const UNKNOWN_FILAMENT_HEX: &str = "#808080";
+
+/// Gives every distinct filament on the plate a slicer filament number.
+///
+/// - A filament is told apart by its swatch id when the item has one, otherwise by its
+///   normalized hex (the same identity the app uses for slots and color groups).
+/// - When the chosen printer has it loaded, it takes that slot's number, so FarmPrint's slot 3
+///   is filament 3 in the slicer and the AMS lines up without remapping. Matched by swatch id;
+///   an item without an id, or whose swatch isn't loaded under that id, matches a slot with the
+///   same hex and material (lowest slot wins).
+/// - Filaments that aren't loaded take the lowest numbers no loaded slot uses, in the order
+///   they first appear, so they never land on a spool holding another color.
+/// - With no slot info that is simply 1, 2, 3 in first-seen order.
+///
+/// Returns the number for each item (index-aligned) and the filaments sorted by number.
+pub fn assign_plate_filaments(
+    items: &[PlateBuildItem],
+    opts: &PlateOptions,
+) -> (Vec<u32>, Vec<PlateFilament>) {
+    let mat_eq = |a: &str, b: &str| {
+        let (a, b) = (a.trim(), b.trim());
+        a.is_empty() || b.is_empty() || a.eq_ignore_ascii_case(b)
+    };
+    let mut slots: Vec<&PlateSlot> = opts.loaded_slots.iter().filter(|s| s.slot > 0).collect();
+    slots.sort_by_key(|s| s.slot);
+    let used_slots: std::collections::BTreeSet<u32> = slots.iter().map(|s| s.slot).collect();
+
+    // Distinct filaments in first-seen order: (key, hex, material, slot match).
+    let mut keys: Vec<String> = Vec::new();
+    let mut filaments: Vec<PlateFilament> = Vec::new();
+    let mut per_item_group: Vec<usize> = Vec::with_capacity(items.len());
+    for (idx, item) in items.iter().enumerate() {
+        let fil = opts.item_filaments.get(idx);
+        let id = fil.map(|f| f.filament_id.trim()).unwrap_or("");
+        let material = fil.map(|f| f.material.trim()).unwrap_or("");
+        let hex = normalize_hex(&item.filament_hex);
+        let key = if !id.is_empty() {
+            format!("id:{id}")
+        } else {
+            format!("hex:{}", hex.as_deref().unwrap_or(UNKNOWN_FILAMENT_HEX))
+        };
+        if let Some(g) = keys.iter().position(|k| *k == key) {
+            per_item_group.push(g);
+            continue;
+        }
+        let by_id = (!id.is_empty())
+            .then(|| slots.iter().find(|s| s.filament_id.trim() == id))
+            .flatten();
+        let by_color = || {
+            hex.as_ref().and_then(|h| {
+                slots.iter().find(|s| {
+                    normalize_hex(&s.filament_hex).as_deref() == Some(h.as_str())
+                        && mat_eq(&s.material, material)
+                })
+            })
+        };
+        let slot = by_id.or_else(by_color);
+        let material = if !material.is_empty() {
+            material.to_string()
+        } else {
+            slot.map(|s| s.material.trim().to_string())
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| "PLA".to_string())
+        };
+        keys.push(key);
+        per_item_group.push(filaments.len());
+        filaments.push(PlateFilament {
+            number: slot.map(|s| s.slot).unwrap_or(0),
+            hex: hex.unwrap_or_else(|| UNKNOWN_FILAMENT_HEX.to_string()),
+            material,
+            from_slot: slot.is_some(),
+        });
+    }
+    // Unloaded filaments: the lowest numbers that no loaded slot (on this plate or not) uses.
+    let mut next = 1u32;
+    for f in filaments.iter_mut().filter(|f| !f.from_slot) {
+        while used_slots.contains(&next) {
+            next += 1;
+        }
+        f.number = next;
+        next += 1;
+    }
+    let numbers = per_item_group
+        .iter()
+        .map(|&g| filaments[g].number)
+        .collect();
+    let mut sorted = filaments;
+    sorted.sort_by_key(|f| f.number);
+    // Two different swatches can sit in one slot only by color match; keep one entry each.
+    sorted.dedup_by_key(|f| f.number);
+    (numbers, sorted)
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 pub fn write_3mf_plate(items: &[PlateBuildItem]) -> Result<Vec<u8>, String> {
-    write_3mf_plate_on_bed(items, PlateBed::default())
+    write_3mf_plate_with(items, &PlateOptions::default())
 }
 
 /// Like `write_3mf_plate`, laying parts out in rows that fit `bed.width_mm`. Errors when the
 /// parts don't fit in `bed.depth_mm` instead of placing some off the bed.
 pub fn write_3mf_plate_on_bed(items: &[PlateBuildItem], bed: PlateBed) -> Result<Vec<u8>, String> {
+    write_3mf_plate_with(items, &PlateOptions::from(bed))
+}
+
+/// Writes the plate for `opts.bed`, giving each object the filament number from
+/// `assign_plate_filaments` so a mixed-color plate opens on the right filaments:
+/// - `Metadata/model_settings.config` (Bambu Studio, OrcaSlicer): object and part `extruder`.
+/// - `Metadata/Slic3r_PE_model.config` (PrusaSlicer): object `extruder` plus one volume.
+///
+/// No print/printer/filament settings files (`project_settings.config`, `Slic3r_PE.config`)
+/// are written: all three slicers treat such a file as a whole project and fill every
+/// setting it lacks with built-in defaults, replacing the user's printer and print profiles.
+///
+/// The model carries no core-spec colors (`<basematerials>`, `pid`/`pindex`) either: Bambu
+/// Studio (2.9) treats a colored 3MF from another app as a color import, erases every
+/// object's `extruder`, and maps the colors onto its own filament list instead, so the
+/// numbers above are lost. Colors on screen come from the user's filament presets.
+pub fn write_3mf_plate_with(
+    items: &[PlateBuildItem],
+    opts: &PlateOptions,
+) -> Result<Vec<u8>, String> {
+    let bed = opts.bed;
     // Written this way so a NaN size is rejected too.
     if bed.width_mm.is_nan() || bed.depth_mm.is_nan() || bed.width_mm <= 0.0 || bed.depth_mm <= 0.0
     {
@@ -843,6 +1046,7 @@ pub fn write_3mf_plate_on_bed(items: &[PlateBuildItem], bed: PlateBed) -> Result
   <resources>
 "#,
         );
+        let (item_numbers, _) = assign_plate_filaments(items, opts);
         // STL stores every triangle with its own three corners. 3MF needs shared corners, or the
         // slicer sees every edge as open. Weld identical corners, then drop collapsed triangles.
         let welded: Vec<WeldedMesh> = items.iter().map(|it| weld_mesh(&it.mesh)).collect();
@@ -892,12 +1096,7 @@ pub fn write_3mf_plate_on_bed(items: &[PlateBuildItem], bed: PlateBed) -> Result
         }
         for (idx, item) in items.iter().enumerate() {
             let obj_id = idx + 1;
-            let name = item
-                .name
-                .replace('&', "&amp;")
-                .replace('"', "&quot;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;");
+            let name = xml_escape(&item.name);
             model_xml.push_str(&format!(
                 "    <object id=\"{}\" name=\"{}\" type=\"model\">\n      <mesh>
         <vertices>
@@ -953,17 +1152,13 @@ pub fn write_3mf_plate_on_bed(items: &[PlateBuildItem], bed: PlateBed) -> Result
             .map_err(|e| e.to_string())?;
         // Bambu Studio / OrcaSlicer read this to keep each part its own object (named, on plate 1)
         // instead of offering to merge them into one multi-part object.
+        // `extruder` is the 1-based filament number from assign_plate_filaments.
         let mut cfg = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n");
         for (idx, item) in items.iter().enumerate() {
-            let name = item
-                .name
-                .replace('&', "&amp;")
-                .replace('"', "&quot;")
-                .replace('<', "&lt;")
-                .replace('>', "&gt;");
+            let name = xml_escape(&item.name);
             cfg.push_str(&format!(
-                "  <object id=\"{id}\">\n    <metadata key=\"name\" value=\"{name}\"/>\n    <metadata key=\"extruder\" value=\"1\"/>\n    <part id=\"{id}\" subtype=\"normal_part\">\n      <metadata key=\"name\" value=\"{name}\"/>\n    </part>\n  </object>\n",
-                id = idx + 1, name = name
+                "  <object id=\"{id}\">\n    <metadata key=\"name\" value=\"{name}\"/>\n    <metadata key=\"extruder\" value=\"{ext}\"/>\n    <part id=\"{id}\" subtype=\"normal_part\">\n      <metadata key=\"name\" value=\"{name}\"/>\n      <metadata key=\"extruder\" value=\"{ext}\"/>\n    </part>\n  </object>\n",
+                id = idx + 1, name = name, ext = item_numbers[idx]
             ));
         }
         cfg.push_str("  <plate>\n    <metadata key=\"plater_id\" value=\"1\"/>\n");
@@ -974,6 +1169,28 @@ pub fn write_3mf_plate_on_bed(items: &[PlateBuildItem], bed: PlateBed) -> Result
         zip.start_file("Metadata/model_settings.config", options)
             .map_err(|e| e.to_string())?;
         zip.write_all(cfg.as_bytes()).map_err(|e| e.to_string())?;
+        // PrusaSlicer's per-object settings. Once an object is listed here PrusaSlicer builds
+        // it only from the listed volumes, so each gets one volume spanning all its triangles
+        // (an object with no triangles is left out and loads as plain geometry).
+        let mut pe = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n");
+        for (idx, item) in items.iter().enumerate() {
+            let tris = welded[idx].1.len();
+            if tris == 0 {
+                continue;
+            }
+            let name = xml_escape(&item.name);
+            pe.push_str(&format!(
+                " <object id=\"{id}\" instances_count=\"1\">\n  <metadata type=\"object\" key=\"name\" value=\"{name}\"/>\n  <metadata type=\"object\" key=\"extruder\" value=\"{ext}\"/>\n  <volume firstid=\"0\" lastid=\"{last}\">\n   <metadata type=\"volume\" key=\"name\" value=\"{name}\"/>\n   <metadata type=\"volume\" key=\"volume_type\" value=\"ModelPart\"/>\n  </volume>\n </object>\n",
+                id = idx + 1,
+                name = name,
+                ext = item_numbers[idx],
+                last = tris - 1
+            ));
+        }
+        pe.push_str("</config>\n");
+        zip.start_file("Metadata/Slic3r_PE_model.config", options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(pe.as_bytes()).map_err(|e| e.to_string())?;
         zip.finish().map_err(|e| e.to_string())?;
     }
     Ok(buf.into_inner())
