@@ -6,6 +6,8 @@ import { JOG_DEG_PER_SEC, JOG_PAN_PX_PER_SEC, JOG_ZOOM_PER_SEC, VIEWPORT_HINT, a
 import { sizeCanvas } from "./PartOrbitThumb";
 import { type DrawPart, drawGuides, nextFrame, paintBackdrop, pickPartAt, projectScene } from "./viewportDrawing";
 import { ViewControls, hudButton, iconButton, menuStyle } from "./ViewControls";
+import { Grid3x3 } from "lucide-react";
+import { Icon } from "../../icons";
 
 export const ThumbnailViewport = forwardRef<ThumbnailViewportHandle, ThumbnailViewportProps>(
   function ThumbnailViewport(props, ref) {
@@ -431,7 +433,7 @@ export const ThumbnailViewport = forwardRef<ThumbnailViewportHandle, ThumbnailVi
             ))}
           </div>
           <button type="button" title={props.showGrid ? "Hide alignment grid" : "Show alignment grid"} onClick={() => props.onShowGrid(!props.showGrid)} style={iconButton(props.showGrid)}>
-            ▦
+            <Icon icon={Grid3x3} />
           </button>
           <select
             aria-label="Viewport backdrop"

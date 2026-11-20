@@ -1,6 +1,8 @@
 import React from "react";
 import { actorDevice } from "../../deviceLabel";
 import { Order, PartUnit, TransitionRequest } from "../../types";
+import { Check } from "lucide-react";
+import { Icon } from "../../icons";
 
 /** "Mark Entire Order Processed" confirmation: moves every unfinished part of the order to Ready. */
 export const BulkOrderConfirmModal: React.FC<{
@@ -80,7 +82,7 @@ export const BulkOrderConfirmModal: React.FC<{
             });
           }}
         >
-          ✓ Confirm &amp; Move {pendingBulkOrder.unfinishedUnits.length} Parts to Ready
+          <Icon icon={Check} /> Confirm &amp; Move {pendingBulkOrder.unfinishedUnits.length} Parts to Ready
         </button>
       </div>
     </div>

@@ -4,6 +4,8 @@ import { PartThumbnail3D } from "../../components/PartThumbnail3D";
 import { statusStepFor } from "../OrdersAndonViews";
 import { useShopSettings } from "../../settingsStore";
 import { outlineReplacesRing } from "../../thumbnailOutline";
+import { Check, X } from "lucide-react";
+import { Icon } from "../../icons";
 
 export interface SuggestedPrintGroup {
   key: string; productId: string; productName: string; filamentName: string; filamentHex: string; material: string;
@@ -100,7 +102,7 @@ export const PartTile64: React.FC<{
               }
             }}
           >
-            {selected ? "✓" : ""}
+            {selected ? <Icon icon={Check} size={12} strokeWidth={3} /> : null}
           </span>
         )}
       </div>
@@ -109,8 +111,8 @@ export const PartTile64: React.FC<{
       </div>
       {showOutcomeButtons && (
         <div style={{ display: "flex", gap: 3, marginTop: 3 }} onClick={(e) => e.stopPropagation()}>
-          <button type="button" title={`Mark ${unit.part_name} done`} onClick={() => move(unit.state === "Printing" ? "Printed" : "Ready", `✓ ${unit.part_name} (${customerLabel})`)} style={{ width: 28, height: 18, borderRadius: 5, border: "1px solid rgba(48,209,88,0.55)", background: "rgba(48,209,88,0.18)", color: "#30d158", fontSize: 10, fontWeight: 800, cursor: "pointer", padding: 0 }}>✓</button>
-          <button type="button" title={`Mark ${unit.part_name} failed`} onClick={() => onRequestFailureReason ? onRequestFailureReason([unit.id], `${unit.part_name} (${customerLabel})`) : move("Queued", `✕ Failed ${unit.part_name}`, "Bed Adhesion")} style={{ width: 28, height: 18, borderRadius: 5, border: "1px solid rgba(255,69,58,0.55)", background: "rgba(255,69,58,0.18)", color: "#ff6961", fontSize: 10, fontWeight: 800, cursor: "pointer", padding: 0 }}>✕</button>
+          <button type="button" title={`Mark ${unit.part_name} done`} onClick={() => move(unit.state === "Printing" ? "Printed" : "Ready", `Done: ${unit.part_name} (${customerLabel})`)} style={{ width: 28, height: 18, borderRadius: 5, border: "1px solid rgba(48,209,88,0.55)", background: "rgba(48,209,88,0.18)", color: "#30d158", fontSize: 10, fontWeight: 800, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={Check} size={12} strokeWidth={3} /></button>
+          <button type="button" title={`Mark ${unit.part_name} failed`} onClick={() => onRequestFailureReason ? onRequestFailureReason([unit.id], `${unit.part_name} (${customerLabel})`) : move("Queued", `Failed: ${unit.part_name}`, "Bed Adhesion")} style={{ width: 28, height: 18, borderRadius: 5, border: "1px solid rgba(255,69,58,0.55)", background: "rgba(255,69,58,0.18)", color: "#ff6961", fontSize: 10, fontWeight: 800, cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={X} size={12} strokeWidth={3} /></button>
         </div>
       )}
     </div>

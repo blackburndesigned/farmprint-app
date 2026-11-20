@@ -13,6 +13,8 @@ import { ShopOrderCard } from "./ShopOrderCard";
 import { type AttentionRow, type DismissedAttentionRow, NeedsAttentionSheet } from "./NeedsAttentionSheet";
 import { PrintPickTray } from "./PrintPickTray";
 import { SampleShopEmptyState } from "../../components/SampleShop";
+import { Download, Folder, ListChecks, Tag, TriangleAlert } from "lucide-react";
+import { Icon } from "../../icons";
 
 /**
  * Full `OrdersListView.swift` + `OrderProductFolderCanvas.swift` + `PrintPickTray.swift` + `NeedsAttentionSheet.swift` 1:1 port.
@@ -93,7 +95,7 @@ export const AllOrdersBoardView: React.FC<{
       if (notSaved.length) {
         console.error(`[store ingest] CLAIMED ON THE SHOP BUT NOT SAVED LOCALLY: ${notSaved.join(", ")}`);
         onFlashBanner?.(
-          `⚠️ ${notSaved.length} website order${notSaved.length === 1 ? " was" : "s were"} claimed on the shop but NOT saved here: ${notSaved.join(", ")}. Add ${notSaved.length === 1 ? "it" : "them"} by hand.`
+          `${notSaved.length} website order${notSaved.length === 1 ? " was" : "s were"} claimed on the shop but NOT saved here: ${notSaved.join(", ")}. Add ${notSaved.length === 1 ? "it" : "them"} by hand.`
             + (n > 0 ? ` Imported ${n} other${n === 1 ? "" : "s"}.` : "")
         );
         return;
@@ -103,7 +105,7 @@ export const AllOrdersBoardView: React.FC<{
       onFlashBanner?.(
         (n > 0 ? `Imported ${n} website order${n === 1 ? "" : "s"}` : "No new website orders")
           + (extra.length ? ` (${extra.join(", ")})` : "")
-          + (held.length ? `. ⚠️ ${held.join(" ")}` : "")
+          + (held.length ? `. ${held.join(" ")}` : "")
       );
     } catch (err) {
       onFlashBanner?.(`Website import failed: ${String(err)}`);
@@ -383,7 +385,8 @@ export const AllOrdersBoardView: React.FC<{
                   onPrintKittingCards?.(chosen);
                 }}
               >
-                🏷️ Print Cards ({selectedOrderIds.size})
+                <Icon icon={Tag} />
+                Print Cards ({selectedOrderIds.size})
               </button>
               <button
                 type="button"
@@ -405,7 +408,8 @@ export const AllOrdersBoardView: React.FC<{
                 disabled={importingWebOrders}
                 title="Bring in new paid orders from the website (claims each one on the shop first, unless turned off in Settings › Store)"
               >
-                {importingWebOrders ? "Importing…" : "⬇️ Import Website Orders"}
+                <Icon icon={Download} />
+                {importingWebOrders ? "Importing…" : "Import Website Orders"}
               </button>
               <button
                 type="button"
@@ -413,7 +417,8 @@ export const AllOrdersBoardView: React.FC<{
                 onClick={() => setShowNeedsAttention(true)}
                 title="Paid website orders that need product matching or review"
               >
-                ⚠️ Needs Attention ({attentionRows.length + importNoteCount(importNotes)})
+                <Icon icon={TriangleAlert} />
+                Needs Attention ({attentionRows.length + importNoteCount(importNotes)})
               </button>
               <button
                 type="button"
@@ -421,7 +426,8 @@ export const AllOrdersBoardView: React.FC<{
                 onClick={() => setPickTrayOpen((v) => !v)}
                 title="Build a mixed plate from In Queue parts"
               >
-                🧊 Pick Parts to Print
+                <Icon icon={ListChecks} />
+                Pick Parts to Print
                 {pickedUnitIds.size > 0 ? ` (${pickedUnitIds.size})` : ""}
               </button>
               {onOpenNewOrderModal && (
@@ -461,8 +467,8 @@ export const AllOrdersBoardView: React.FC<{
             }}
           >
             <div>
-              <div style={{ fontSize: 14.5, fontWeight: 800 }}>
-                📁 {folderOrder.customer_name} · {folderOrder.order_code} ({folderOrder.lines.length} product lines)
+              <div style={{ fontSize: 14.5, fontWeight: 800, display: "flex", alignItems: "center", gap: 6 }}>
+                <Icon icon={Folder} /> {folderOrder.customer_name} · {folderOrder.order_code} ({folderOrder.lines.length} product lines)
               </div>
               <div style={{ fontSize: 11.5, color: "rgba(235,235,245,0.68)" }}>
                 Individual product cards inside this order · Click any line card to open Order Detail
@@ -474,7 +480,8 @@ export const AllOrdersBoardView: React.FC<{
                 className="fp-btn fp-btn-sm"
                 onClick={() => onPrintKittingCards?.([folderOrder])}
               >
-                🏷️ Print 4×6 Kitting Card
+                <Icon icon={Tag} />
+                Print 4×6 Kitting Card
               </button>
               <button
                 type="button"

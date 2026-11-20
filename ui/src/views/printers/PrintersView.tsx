@@ -10,6 +10,8 @@ import { FAILURE_REASONS, confirmRemovePrinter, notifyError } from "../../uiFeed
 import { LANE_COLORS, PartTile64, type PrintersQueueCommonProps, prefersLightOnHex } from "./printersShared";
 import { groupLaneUnits, laneCountLabel } from "./laneGroups";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
+import { Check, Circle, CircleDot, Palette, X } from "lucide-react";
+import { Icon } from "../../icons";
 
 export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   snapshot, onTransition, onSelectUnit, wallMode: controlledWall, onToggleWallMode, onSnapshotUpdated,
@@ -68,7 +70,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
       printer_id: null,
       actor_device: "Mac Studio (FarmPrint)",
       source_surface: "Printers",
-      action_label: `✕ Failed (${failureReason}): ${failureModalTarget.label}`,
+      action_label: `Failed (${failureReason}): ${failureModalTarget.label}`,
       failure_reason: failureReason,
       failure_note: failureNote.trim() || `${failureReason} — queued for reprint`,
     });
@@ -142,7 +144,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
           </div>
         </div>
         <button type="button" className="fp-btn fp-btn-sm" onClick={() => setShowFilamentModal(true)}>
-          🎨 Filament Library ({localFilaments.length})
+          <Icon icon={Palette} /> Filament Library ({localFilaments.length})
         </button>
         <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => setShowAddPrinterModal(true)}>
           + Add Printer
@@ -192,7 +194,10 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                       <span style={{ fontSize: 13, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(255,255,255,0.1)" }}>{printer.model}</span>
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 800, color: isPrinting ? "#30d158" : "rgba(235,235,245,0.65)", marginTop: 4 }}>
-                      {isPrinting ? `● PRINTING (${laneUnits.length} parts)` : laneUnits.length > 0 ? `◐ STAGED (${laneUnits.length} parts)` : "○ IDLE"}
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <Icon icon={isPrinting ? Circle : laneUnits.length > 0 ? CircleDot : Circle} size={18} strokeWidth={2.5} fill={isPrinting ? "currentColor" : "none"} />
+                        {isPrinting ? `PRINTING (${laneUnits.length} parts)` : laneUnits.length > 0 ? `STAGED (${laneUnits.length} parts)` : "IDLE"}
+                      </span>
                     </div>
                     <div style={{ fontSize: 22, fontWeight: 700, color: "#f8fafc", marginTop: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {productLabel}
@@ -219,8 +224,8 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                 </div>
                 {laneUnits.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
-                    <button type="button" title="Mark whole job done" onClick={() => onTransition({ unit_ids: laneUnits.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers Wall TV", action_label: `Plate done on ${printer.name}`, failure_reason: null, failure_note: null })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #30d158", background: "rgba(48,209,88,0.22)", color: "#30d158", fontSize: 24, fontWeight: 900, cursor: "pointer" }}>✓</button>
-                    <button type="button" title="Mark whole job failed" onClick={() => setFailureModalTarget({ unitIds: laneUnits.map((u) => u.id), label: `All jobs on ${printer.name}` })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #ff453a", background: "rgba(255,69,58,0.22)", color: "#ff6961", fontSize: 24, fontWeight: 900, cursor: "pointer" }}>✕</button>
+                    <button type="button" title="Mark whole job done" onClick={() => onTransition({ unit_ids: laneUnits.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers Wall TV", action_label: `Plate done on ${printer.name}`, failure_reason: null, failure_note: null })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #30d158", background: "rgba(48,209,88,0.22)", color: "#30d158", fontSize: 24, fontWeight: 900, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={Check} size={28} strokeWidth={3} /></button>
+                    <button type="button" title="Mark whole job failed" onClick={() => setFailureModalTarget({ unitIds: laneUnits.map((u) => u.id), label: `All jobs on ${printer.name}` })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #ff453a", background: "rgba(255,69,58,0.22)", color: "#ff6961", fontSize: 24, fontWeight: 900, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={X} size={28} strokeWidth={3} /></button>
                   </div>
                 )}
               </div>
@@ -242,7 +247,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     <div style={{ fontSize: 11, opacity: 0.84 }}>{laneCountLabel(slices, boardView)} · {laneUnits.length} parts · {laneUnits.some((u) => u.state === "Printing") ? "Printing" : "Idle"}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                    <button type="button" title={`Set loaded filament spools on ${printer.name}`} onClick={() => setEditingPrinterSlotsId(printer.id)} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.26)", color: "#fff", cursor: "pointer", fontSize: 12 }}>🎨</button>
+                    <button type="button" title={`Set loaded filament spools on ${printer.name}`} onClick={() => setEditingPrinterSlotsId(printer.id)} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.26)", color: "#fff", cursor: "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon icon={Palette} size={14} /></button>
                     <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(0,0,0,0.22)", color: "#fff" }}>{printer.model}</span>
                   </div>
                 </div>
@@ -295,8 +300,8 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                               <div style={{ fontSize: 10.5, fontWeight: 600, color: "#64d2ff" }}>{units.some((u) => u.state === "Printing") ? `Printing ~${Math.max(1, Math.round(totalMins / 60))}h` : "Staged on plate"}</div>
                             </div>
                             <div style={{ display: "flex", gap: 3 }}>
-                              <button type="button" className="fp-btn fp-btn-sm fp-btn-success" style={{ padding: "2px 6px" }} title="Mark plate done" onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: `Done: ${groupLabel}`, failure_reason: null, failure_note: null })}>✓</button>
-                              <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" style={{ padding: "2px 6px" }} title="Mark plate failed" onClick={() => setFailureModalTarget({ unitIds: units.map((u) => u.id), label: `${groupLabel} on ${printer.name}` })}>✕</button>
+                              <button type="button" className="fp-btn fp-btn-sm fp-btn-success" style={{ padding: "2px 6px" }} title="Mark plate done" onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: `Done: ${groupLabel}`, failure_reason: null, failure_note: null })}><Icon icon={Check} size={14} /></button>
+                              <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" style={{ padding: "2px 6px" }} title="Mark plate failed" onClick={() => setFailureModalTarget({ unitIds: units.map((u) => u.id), label: `${groupLabel} on ${printer.name}` })}><Icon icon={X} size={14} /></button>
                             </div>
                           </div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -304,7 +309,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                             <select aria-label="Move job" value="" onChange={(e) => e.target.value && onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printing", printer_id: e.target.value, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: "Moved job to printer", failure_reason: null, failure_note: null })} style={{ background: "rgba(255,255,255,0.06)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, fontSize: 10.5, padding: "2px 6px" }}>
-                              <option value="">⇄ Move…</option>
+                              <option value="">Move…</option>
                               {localPrinters.filter((p) => p.id !== printer.id).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                             <button type="button" className="fp-btn fp-btn-sm" style={{ padding: "2px 8px", fontSize: 10.5 }} onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Queued", printer_id: null, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: "Returned job to In Queue", failure_reason: null, failure_note: null })}>Queue</button>
@@ -373,7 +378,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                       <div style={{ fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sw.name}</div>
                       <div style={{ fontSize: 10, color: "rgba(235,235,245,0.6)" }}>{sw.brand} · {sw.material}</div>
                     </div>
-                    {loaded && <span style={{ color: "#38bdf8", fontWeight: 900 }}>✓</span>}
+                    {loaded && <span style={{ color: "#38bdf8", display: "inline-flex" }}><Icon icon={Check} size={16} strokeWidth={3} /></span>}
                   </button>
                 );
               })}
@@ -447,7 +452,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button type="button" className="fp-btn fp-btn-sm" onClick={() => setEditingPrinterSlotsId(p.id)}>🎨 Spools</button>
+                      <button type="button" className="fp-btn fp-btn-sm" onClick={() => setEditingPrinterSlotsId(p.id)}><Icon icon={Palette} /> Spools</button>
                       <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" onClick={() => handleRemovePrinter(p.id)}>Remove</button>
                     </div>
                   </div>

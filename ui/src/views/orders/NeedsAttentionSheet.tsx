@@ -2,6 +2,8 @@ import React from "react";
 import { ImportNotesBanner } from "../../storeImportNotes";
 import { invoke } from "../../tauriInvoke";
 import { Product, ShopSnapshot } from "../../types";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
+import { Icon } from "../../icons";
 
 export interface AttentionRow {
   id: string;
@@ -62,8 +64,8 @@ export const NeedsAttentionSheet: React.FC<{
               border: "1px dashed rgba(255,255,255,0.12)",
             }}
           >
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
-              ✓ Nothing waiting
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Icon icon={Check} /> Nothing waiting
             </div>
             <div style={{ fontSize: 12.5, color: "rgba(235,235,245,0.6)" }}>
               All paid website orders are matched to catalog products.
@@ -164,7 +166,7 @@ export const NeedsAttentionSheet: React.FC<{
             className="fp-btn fp-btn-sm"
             onClick={() => setShowDismissedGroup((v) => !v)}
           >
-            {showDismissedGroup ? "▼" : "▶"} Dismissed ({dismissedRows.length})
+            <Icon icon={showDismissedGroup ? ChevronDown : ChevronRight} size={14} /> Dismissed ({dismissedRows.length})
           </button>
           {showDismissedGroup && (
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>

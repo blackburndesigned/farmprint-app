@@ -20,6 +20,8 @@ import {
   toggleUnit,
   type Selection,
 } from "./partSelection";
+import { Package, Printer } from "lucide-react";
+import { Icon } from "../../icons";
 
 /** Header checkbox for a group: checked, unchecked, or mixed when only some are selected. */
 const GroupCheck: React.FC<{ sel: Selection; ids: string[]; label: string; onToggle: () => void }> = ({
@@ -356,7 +358,7 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                   cursor: "pointer",
                 }}
               >
-                📦 {ovMatch.quantity} in stock · Pull
+                <Icon icon={Package} size={12} /> {ovMatch.quantity} in stock · Pull
               </button>
             )}
             <span
@@ -500,7 +502,7 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
           className="fp-btn fp-btn-primary"
           onClick={() => setOpen(true)}
         >
-          ⎙ Print… ({colorGroups.length} Suggested Groups)
+          <Icon icon={Printer} /> Print… ({colorGroups.length} Suggested Groups)
         </button>
       </div>
       <StatusLegendHeader />
@@ -679,7 +681,7 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                                 title={`Pull from Overstock (${ov.quantity} in stock)`}
                                 onClick={() => handlePullFromOverstock(ov, u)}
                               >
-                                📦 Pull ({ov.quantity})
+                                <Icon icon={Package} size={12} /> Pull ({ov.quantity})
                               </button>
                             )}
                           </div>

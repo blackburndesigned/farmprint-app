@@ -9,6 +9,8 @@ import { confirmRemovePrinter, notifyError } from "../../uiFeedback";
 import { FilamentSwatch, Printer, PrinterSlot, ShopSettings, ShopSnapshot } from "../../types";
 import { Check, ColorInput, PathRow, Row, Section, type Setter, caption, choosePath, inputStyle } from "./settingsUi";
 import { SLICERS, type SlicerKey, chooseSlicerAppPatch, pickSlicerPatch, savedSlicer } from "../../slicerChoice";
+import { Frame, X } from "lucide-react";
+import { Icon } from "../../icons";
 
 // --- Printers -------------------------------------------------------------------
 
@@ -73,7 +75,7 @@ const PrinterCard: React.FC<{ printer: Printer; accent: string; onOpen: () => vo
             slots.map((s) => <Swatch key={`${s.slot_index}-${s.filament_id}`} slot={s} />)
           )}
         </div>
-        <div className="fp-printer-tile-sub" style={{ marginTop: 2 }}>▭ {bedLabel(p)}</div>
+        <div className="fp-printer-tile-sub" style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><Icon icon={Frame} size={12} /> {bedLabel(p)}</div>
       </div>
     </button>
   );
@@ -204,7 +206,7 @@ const PrinterEditSheet: React.FC<{
                         title="Unload"
                         onClick={() => setSlots(slotIds.filter((_, k) => k !== i))}
                       >
-                        ✕
+                        <Icon icon={X} size={14} />
                       </button>
                     </div>
                   </div>

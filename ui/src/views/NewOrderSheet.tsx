@@ -23,6 +23,8 @@ import { PartThumb, ProductCompositeThumb } from "../partThumbnails";
 import { isPictureOnlyCatalogPart, previewColorsForProduct, previewCompositeParts } from "../previewColors";
 import { OrderThumbnailCapture, OrderViewport3D, OrderViewport3DHandle, renderOrderThumbnail } from "../components/OrderViewport3D";
 import type { CameraState } from "../viewportCamera";
+import { Trash2, User } from "lucide-react";
+import { Icon } from "../icons";
 
 /** One created order line's own picture. Persist per order line, locally only. */
 export interface NewOrderLineThumbnail {
@@ -563,7 +565,7 @@ export const NewOrderSheet: React.FC<{
         <input placeholder="Customer / name" value={customerName} style={field} autoFocus data-fp-customer-name="1"
           onChange={(e) => { setCustomerName(e.target.value); setLinkedCustomer(null); }} />
         {suggestions.map((s) => (
-          <button key={s} style={{ ...linkBtn, color: secondary, textAlign: "left" }} onClick={() => { setCustomerName(s); setLinkedCustomer(s); }}>👤 {s}</button>
+          <button key={s} style={{ ...linkBtn, color: secondary, textAlign: "left" }} onClick={() => { setCustomerName(s); setLinkedCustomer(s); }}><Icon icon={User} size={13} /> {s}</button>
         ))}
         <textarea placeholder="Notes" value={notes} rows={2} style={{ ...field, resize: "vertical" }} onChange={(e) => setNotes(e.target.value)} />
         {toggle("Rush", isRush, setIsRush)}
@@ -649,7 +651,7 @@ export const NewOrderSheet: React.FC<{
           <button style={{ ...linkBtn, fontWeight: 600 }} title="Add another product to this order"
             onClick={() => { setPickingAdditionalLine(true); setStep("pickProduct"); }}>＋ Add product</button>
           {draftLines.length > 1 && (
-            <button style={{ ...linkBtn, color: "#ff453a" }} title="Remove this product line" onClick={removeActiveLine}>🗑 Remove</button>
+            <button style={{ ...linkBtn, color: "#ff453a" }} title="Remove this product line" onClick={removeActiveLine}><Icon icon={Trash2} size={13} /> Remove</button>
           )}
         </div>
         {isMultiLine && <div style={{ ...caption, fontSize: 10.5, marginTop: 6 }}>One order · {draftLines.length} products · {unitBurstCount} total units</div>}

@@ -3,6 +3,8 @@ import "../index.css";
 import { BrandLogo } from "./BrandLogo";
 import { shortcut } from "../platform";
 import { isTypingTarget } from "../uiFeedback";
+import { Archive, Box, Check, CircleDollarSign, CircleUser, ClipboardList, History, LayoutGrid, Printer, Repeat, Settings, Siren, Truck, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Icon } from "../icons";
 
 export type DockTab =
   | "orders" | "andon" | "printers" | "parts" | "overstock"
@@ -11,23 +13,24 @@ export type DockTab =
 
 export interface DockTabSpec {
   id: DockTab;
-  icon: string;
+  /** Lucide icon (icons.tsx), drawn at 20 px in the dock and 18 px in the sidebar. */
+  icon: LucideIcon;
   label: string;
   shortcut?: string;
 }
 
 export const DOCK_TABS: DockTabSpec[] = [
-  { id: "orders", icon: "📋", label: "All Orders", shortcut: shortcut("1") },
-  { id: "andon", icon: "🚥", label: "ANDON", shortcut: shortcut("2") },
-  { id: "printers", icon: "🖨️", label: "Printers", shortcut: shortcut("3") },
-  { id: "parts", icon: "🧩", label: "Parts to Print", shortcut: shortcut("4") },
-  { id: "overstock", icon: "📦", label: "Overstock", shortcut: shortcut("5") },
-  { id: "flow", icon: "⚡", label: "Flow", shortcut: shortcut("6") },
-  { id: "products", icon: "🎨", label: "Products", shortcut: shortcut("7") },
-  { id: "ready", icon: "🚚", label: "Ready to Ship", shortcut: shortcut("8") },
-  { id: "history", icon: "🕓", label: "History", shortcut: shortcut("9") },
-  { id: "value", icon: "💰", label: "Production Value", shortcut: shortcut("0") },
-  { id: "people", icon: "👤", label: "People", shortcut: shortcut("P", true) },
+  { id: "orders", icon: ClipboardList, label: "All Orders", shortcut: shortcut("1") },
+  { id: "andon", icon: Siren, label: "ANDON", shortcut: shortcut("2") },
+  { id: "printers", icon: Printer, label: "Printers", shortcut: shortcut("3") },
+  { id: "parts", icon: LayoutGrid, label: "Parts to Print", shortcut: shortcut("4") },
+  { id: "overstock", icon: Archive, label: "Overstock", shortcut: shortcut("5") },
+  { id: "flow", icon: Repeat, label: "Flow", shortcut: shortcut("6") },
+  { id: "products", icon: Box, label: "Products", shortcut: shortcut("7") },
+  { id: "ready", icon: Truck, label: "Ready to Ship", shortcut: shortcut("8") },
+  { id: "history", icon: History, label: "History", shortcut: shortcut("9") },
+  { id: "value", icon: CircleDollarSign, label: "Production Value", shortcut: shortcut("0") },
+  { id: "people", icon: CircleUser, label: "People", shortcut: shortcut("P", true) },
 ];
 
 export const ORDER_STATUS_PILLS = ["All", "Waiting", "Printing", "Ready to Ship"] as const;
@@ -259,7 +262,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           className="fp-btn fp-btn-sm"
           onClick={() => switchTab(activeTab === "printers" ? "andon" : "printers")}
         >
-          {activeTab === "printers" ? "🚥 ANDON Wall" : "🖨️ Printers Wall"}
+          <Icon icon={activeTab === "printers" ? Siren : Printer} />
+          {activeTab === "printers" ? "ANDON Wall" : "Printers Wall"}
         </button>
         <button
           type="button"
@@ -296,7 +300,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             maxWidth: "min(760px, 92vw)",
           }}
         >
-          <span role={bannerIsError ? "alert" : "status"}>{bannerIsError ? "⚠︎ " : "✓ "}{bannerMessage}</span>
+          <span role={bannerIsError ? "alert" : "status"} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon icon={bannerIsError ? TriangleAlert : Check} size={15} style={{ color: bannerIsError ? "#ff6961" : "#38bdf8" }} />
+            <span>{bannerMessage}</span>
+          </span>
           {onBannerUndo && !bannerIsError && (
             <button
               type="button"
@@ -323,96 +330,6 @@ export interface BottomDockProps {
   onOpenSettings?: () => void;
 }
 
-const DOCK_SVG_ICONS: Record<string, React.ReactNode> = {
-  orders: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="16" rx="3" />
-      <line x1="7" y1="9" x2="10" y2="9" />
-      <line x1="13" y1="9" x2="17" y2="9" />
-      <line x1="7" y1="13" x2="10" y2="13" />
-      <line x1="13" y1="13" x2="17" y2="13" />
-    </svg>
-  ),
-  andon: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2v3M4.93 4.93l2.12 2.12M19.07 4.93l-2.12 2.12M2 12h3M19 12h3" />
-      <path d="M8 14a4 4 0 1 1 8 0v4H8v-4z" />
-      <line x1="6" y1="20" x2="18" y2="20" />
-    </svg>
-  ),
-  printers: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 9V3h12v6" />
-      <rect x="3" y="9" width="18" height="9" rx="2" />
-      <path d="M6 15h12v6H6z" />
-    </svg>
-  ),
-  parts: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
-  ),
-  overstock: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="4" width="20" height="5" rx="1.5" />
-      <path d="M4 9v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
-      <line x1="10" y1="13" x2="14" y2="13" />
-    </svg>
-  ),
-  flow: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="17 2 21 6 17 10" />
-      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-      <polyline points="7 22 3 18 7 14" />
-      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-    </svg>
-  ),
-  products: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-      <path d="m3.3 7 8.7 5 8.7-5" />
-      <path d="M12 22V12" />
-    </svg>
-  ),
-  ready: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1" y="4" width="14" height="12" rx="1.5" />
-      <polygon points="15 8 19 8 23 12 23 16 15 16 15 8" />
-      <circle cx="5.5" cy="18" r="2" />
-      <circle cx="18.5" cy="18" r="2" />
-    </svg>
-  ),
-  history: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-      <path d="M3 3v5h5" />
-      <path d="M12 7v5l4 2" />
-    </svg>
-  ),
-  value: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M15 9.5c-.5-1.2-1.7-2-3-2-1.8 0-3 1-3 2.3 0 3 6 1.8 6 4.9 0 1.4-1.3 2.3-3 2.3-1.5 0-2.7-.8-3.2-2" />
-      <line x1="12" y1="6" x2="12" y2="18" />
-    </svg>
-  ),
-  people: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <circle cx="12" cy="10" r="3" />
-      <path d="M7 18.5c1.2-2 3-3 5-3s3.8 1 5 3" />
-    </svg>
-  ),
-  settings: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  ),
-};
 
 /**
  * 1:1 port of `BottomTabBar.swift`:
@@ -455,7 +372,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
               onClick={() => onTabChange(t.id)}
               title={t.shortcut ? `${t.label} (${t.shortcut})` : t.label}
             >
-              <span className="fp-dock-icon">{DOCK_SVG_ICONS[t.id] || t.icon}</span>
+              <span className="fp-dock-icon"><Icon icon={t.icon} size={20} /></span>
               <span className="fp-dock-label">{t.label}</span>
             </button>
           );
@@ -467,7 +384,7 @@ export const BottomDock: React.FC<BottomDockProps> = ({
             onClick={onOpenSettings}
             title={`Settings (${shortcut(",")})`}
           >
-            <span className="fp-dock-icon">{DOCK_SVG_ICONS.settings}</span>
+            <span className="fp-dock-icon"><Icon icon={Settings} size={20} /></span>
             <span className="fp-dock-label">Settings</span>
           </button>
         )}
@@ -495,7 +412,7 @@ export const SidebarNav: React.FC<BottomDockProps> = ({ activeTab, onTabChange, 
           title={t.shortcut ? `${t.label} (${t.shortcut})` : t.label}
         >
           <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-            {DOCK_SVG_ICONS[t.id] || t.icon}
+            <Icon icon={t.icon} size={18} />
           </span>
           <span>{t.label}</span>
           {badges?.[t.id] ? <span className="fp-sidebar-badge">{badges[t.id]}</span> : null}
@@ -504,7 +421,7 @@ export const SidebarNav: React.FC<BottomDockProps> = ({ activeTab, onTabChange, 
       <div className="fp-sidebar-spacer" />
       {onOpenSettings && (
         <button type="button" className="fp-sidebar-item" onClick={onOpenSettings} title={`Settings (${shortcut(",")})`}>
-          <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>{DOCK_SVG_ICONS.settings}</span>
+          <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}><Icon icon={Settings} size={18} /></span>
           <span>Settings</span>
         </button>
       )}

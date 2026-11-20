@@ -3,6 +3,8 @@
 // shown as an expandable banner on Orders and inside Needs Attention. Words come from fp-sync
 // and name each order by its BD- number.
 import React, { useState, useSyncExternalStore } from "react";
+import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
+import { Icon } from "./icons";
 
 export interface ImportNotes {
   at: string;
@@ -88,7 +90,7 @@ export const ImportNotesBanner: React.FC<{ inline?: boolean }> = ({ inline }) =>
           onClick={() => setOpen((v) => !v)}
           style={{ flex: 1, justifyContent: "flex-start", background: "transparent", border: "none", fontWeight: 700 }}
         >
-          {open ? "▼" : "▶"} ⚠️ {title}
+          <Icon icon={open ? ChevronDown : ChevronRight} size={14} /> <Icon icon={TriangleAlert} size={14} /> {title}
         </button>
         <button type="button" className="fp-btn fp-btn-sm" onClick={clearImportNotes}>
           Dismiss

@@ -8,6 +8,8 @@ import { LazyMount } from "../components/LazyMount";
 import { isThumbnailOnlyPart } from "../partThumbnails";
 import { failureLabel, failureText } from "./flowJob";
 import { FlowJobDetail } from "./FlowJobDetail";
+import { Printer, Undo2, X } from "lucide-react";
+import { Icon } from "../icons";
 
 export interface FlowViewProps {
   snapshot: ShopSnapshot;
@@ -221,14 +223,14 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                     {customerName} <span style={{ color: "rgba(235,235,245,0.5)", fontWeight: 500 }}>({unit.order_code})</span>
                   </div>
                   <div style={{ fontSize: 10.5, color: "rgba(235,235,245,0.6)", marginTop: 1 }}>
-                    {unit.filament_name} {printerName ? `· 🖨 ${printerName}` : ""}
+                    {unit.filament_name} {printerName ? <>· <Icon icon={Printer} size={11} /> {printerName}</> : ""}
                   </div>
                   {lastFailure && (
                     <div
                       title={failureLabel(lastFailure)}
                       style={{ fontSize: 10.5, fontWeight: 800, color: "#ff6961", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                     >
-                      ✕ {failureLabel(lastFailure)}
+                      <Icon icon={X} size={11} /> {failureLabel(lastFailure)}
                       {failedEvents.length > 1 ? ` (×${failedEvents.length})` : ""}
                     </div>
                   )}
@@ -263,7 +265,7 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                         </div>
                         {st.id === "Printing" && (unit.reprint_count > 0 || stageFailed.length > 0) && (
                           <div style={{ fontSize: 9, fontWeight: 800, color: "#ff6961", marginTop: 2 }}>
-                            ✕ {(stageFailed.length > 0 && failureText(stageFailed[stageFailed.length - 1])) || `Reprint ×${unit.reprint_count}`}
+                            <Icon icon={X} size={10} /> {(stageFailed.length > 0 && failureText(stageFailed[stageFailed.length - 1])) || `Reprint ×${unit.reprint_count}`}
                           </div>
                         )}
                       </div>
@@ -284,7 +286,7 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                   }}
                   title={`Undo: ${undoable.action_label}`}
                 >
-                  ↩︎ Undo
+                  <Icon icon={Undo2} size={14} /> Undo
                 </button>
               )}
             </div>

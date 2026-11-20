@@ -2,6 +2,8 @@ import React from "react";
 import { PartOrbitThumb } from "../StudioViewport3D";
 import { type ImportedStudioPart, type StudioPartRole } from "./importTypes";
 import { FormSection, fieldStyle, iconChip, menuItem, menuPop, plainButton } from "./importFormUi";
+import { Eye, EyeOff, Trash2 } from "lucide-react";
+import { Icon } from "../../icons";
 
 /** Step 2 (Parts): part list, roles, colors, groups and add-ons. */
 export const PartsStep: React.FC<{
@@ -97,7 +99,7 @@ export const PartsStep: React.FC<{
                     onClick={() => setParts((prev) => prev.map((item) => item.id === part.id ? { ...item, showInPicture: !item.showInPicture } : item))}
                     style={{ ...iconChip, pointerEvents: "auto", color: part.showInPicture ? "#0a84ff" : "inherit" }}
                   >
-                    {part.showInPicture ? "◉" : "◌"}
+                    <Icon icon={part.showInPicture ? Eye : EyeOff} size={14} />
                   </button>
                   <button
                     type="button"
@@ -110,7 +112,7 @@ export const PartsStep: React.FC<{
                     }}
                     style={{ ...iconChip, pointerEvents: "auto", color: "#ff3b30" }}
                   >
-                    🗑
+                    <Icon icon={Trash2} size={14} />
                   </button>
                 </div>
               </div>
@@ -193,7 +195,7 @@ export const PartsStep: React.FC<{
               }}
               style={plainButton}
             >
-              🗑
+              <Icon icon={Trash2} size={14} />
             </button>
           </div>
         ))}

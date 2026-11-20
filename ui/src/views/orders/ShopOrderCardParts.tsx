@@ -5,6 +5,8 @@ import { Order, OrderLine, PartUnit } from "../../types";
 import { isThumbnailOnlyUnit, ProductCompositeThumb } from "../../partThumbnails";
 import { OrderLinePicture } from "../../orderLineThumbs";
 import { progressColorHex } from "./orderStatus";
+import { Folder } from "lucide-react";
+import { Icon } from "../../icons";
 
 /** Multi-product order: one small composite per product line, in a grid. */
 export const OrderLinesCompositeGrid: React.FC<{
@@ -223,7 +225,7 @@ export const ShopOrderCardHeader: React.FC<{
               cursor: "pointer",
             }}
           >
-            📁 {order.lines.length} items
+            <Icon icon={Folder} size={13} /> {order.lines.length} items
           </button>
         )}
         {order.is_on_hold && (
