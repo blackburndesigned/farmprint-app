@@ -7,7 +7,8 @@ import { getShopSettings, saveShopSettingsPatch } from "../../settingsStore";
 import { BedSizeFields } from "../BedSizeFields";
 import { confirmRemovePrinter, notifyError } from "../../uiFeedback";
 import { FilamentSwatch, Printer, PrinterSlot, ShopSettings, ShopSnapshot } from "../../types";
-import { Check, ColorInput, PathRow, Section, type Setter, caption, choosePath, inputStyle } from "./settingsUi";
+import { Check, ColorInput, PathRow, Row, Section, type Setter, caption, choosePath, inputStyle } from "./settingsUi";
+import { SLICERS, type SlicerKey, chooseSlicerAppPatch, pickSlicerPatch, savedSlicer } from "../../slicerChoice";
 
 // --- Printers -------------------------------------------------------------------
 
@@ -357,8 +358,51 @@ export const PrintersTab: React.FC<{
 
 // --- Print library ----------------------------------------------------------------
 
+/** Which slicer Print! opens plates in (see `slicerChoice.ts` and the app's `slicer.rs`). */
+const SlicerSection: React.FC<{ settings: ShopSettings; patch: Setter }> = ({ settings, patch }) => {
+  const slicer = savedSlicer(settings);
+  return (
+    <Section
+      title="Slicer"
+      footer="Print! builds the plate and opens it in this slicer. If it isn't installed, the plate opens in the app your computer uses for .3mf files. Set the app location only if the slicer is installed somewhere unusual."
+    >
+      <Row label="Open plates in">
+        <select
+          aria-label="Slicer for Print!"
+          value={slicer}
+          onChange={(e) => {
+            const key = e.target.value;
+            if (key !== "other") patch(pickSlicerPatch(key as SlicerKey, settings));
+          }}
+          style={{ ...inputStyle, maxWidth: 220 }}
+        >
+          {SLICERS.map((x) => (
+            <option key={x.key} value={x.key}>
+              {x.name}
+            </option>
+          ))}
+          {slicer === "other" && <option value="other">{settings.slicer_app_name || "Other app"}</option>}
+        </select>
+      </Row>
+      <PathRow
+        label="App location"
+        path={settings.slicer_app_path}
+        empty="Found automatically"
+        onChoose={async () => {
+          const p = await choosePath(true, `Choose your slicer app (e.g. in ${appsFolderHint()})`);
+          if (p) patch(chooseSlicerAppPatch(p));
+        }}
+        onClear={() =>
+          patch(slicer === "other" ? { slicer_app_path: "", slicer_app_name: "", slicer_bundle_id: "" } : { slicer_app_path: "" })
+        }
+      />
+    </Section>
+  );
+};
+
 export const PrintLibraryTab: React.FC<{ settings: ShopSettings; patch: Setter }> = ({ settings, patch }) => (
   <>
+    <SlicerSection settings={settings} patch={patch} />
     <Section
       title="Product library folder"
       footer="Drop .3mf / .stl files (or folders of meshes) here. FarmPrint shows a placeholder card on Products until you generate thumbnails and set a price."
@@ -393,18 +437,8 @@ export const PrintLibraryTab: React.FC<{ settings: ShopSettings; patch: Setter }
         checked={settings.group_print_queue_as_3mf}
         onChange={(v) => patch({ group_print_queue_as_3mf: v })}
       />
-      <PathRow
-        label="Slicer"
-        path={settings.slicer_app_path}
-        empty="Not chosen"
-        onChoose={async () => {
-          const p = await choosePath(true, `Choose your slicer app (e.g. in ${appsFolderHint()})`);
-          if (p) patch({ slicer_app_path: p, slicer_app_name: p.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.(app|exe|AppImage)$/i, "") || "" });
-        }}
-        onClear={() => patch({ slicer_app_path: "", slicer_app_name: "" })}
-      />
       <Check
-        label="Open staged kits in this slicer"
+        label="Open staged kits in the slicer above"
         checked={settings.open_staged_in_slicer}
         onChange={(v) => patch({ open_staged_in_slicer: v })}
       />
