@@ -1,5 +1,6 @@
 # FarmPrint release build. Triggered by pushing a tag like v0.9.0.
-# Produces a DRAFT GitHub release with installers + updater artifacts (latest.json).
+# Produces a DRAFT GitHub release with installers, .sig files, and one latest.json
+# built after every platform job finishes (see the latest-json job).
 # After testing the draft, the maintainer publishes the signed artifacts to the releases repo.
 # No Apple / Windows code signing; only Tauri updater signing via secrets.
 name: release
@@ -125,6 +126,37 @@ jobs:
           projectPath: src-tauri
           tauriScript: npx --yes @tauri-apps/cli@^2
           # Force updater artifacts on in CI even though tauri.conf.json has false.
+          # Do not set includeUpdaterJson: each matrix job would upload its own
+          # latest.json and the last one to finish would overwrite the rest.
           args: ${{ matrix.args }} --config {"bundle":{"createUpdaterArtifacts":true}}
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
+
+  # One complete latest.json after every platform has uploaded its .sig files.
+  latest-json:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          mkdir -p /tmp/fp-sigs
+          gh release download "$TAG" --repo "$REPO" --pattern '*.sig' --dir /tmp/fp-sigs
+          gh release view "$TAG" --repo "$REPO" --json body --jq .body > /tmp/fp-notes.md
+          python3 scripts/make_latest_json.py \
+            --assets-dir /tmp/fp-sigs \
+            --version "$VERSION" \
+            --notes-file /tmp/fp-notes.md \
+            --repo "$REPO" \
+            --output /tmp/latest.json
+          gh release upload "$TAG" /tmp/latest.json --repo "$REPO" --clobber
