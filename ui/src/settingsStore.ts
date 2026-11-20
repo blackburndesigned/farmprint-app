@@ -2,8 +2,8 @@
 // successful save in Settings, so every screen re-renders without a restart.
 import { useSyncExternalStore } from "react";
 import { invoke } from "./tauriInvoke";
+import { applyThemeMode, onSystemThemeChange, resolveTheme, systemPrefersDark } from "./theme";
 import {
-  AppearanceStudio,
   EMPTY_APPEARANCE_STUDIO,
   EMPTY_SHOP_SETTINGS,
   ShopSettings,
@@ -33,7 +33,7 @@ export function getShopSettings(): ShopSettings {
 
 export function setShopSettings(next: Partial<ShopSettings> | null | undefined) {
   current = normalizeSettings(next);
-  applyAppearance(current.appearance_studio);
+  applyTheme(current);
   void refreshLogo(current.logo_path);
   emit();
 }
@@ -160,56 +160,17 @@ export function printerAccent(printerId: string | null | undefined): string | un
   return hex && /^#[0-9a-f]{6}$/i.test(hex) ? hex : undefined;
 }
 
-// --- Appearance Studio → CSS variables ------------------------------------------
+// --- Light / Dark ------------------------------------------------------------------
 
-/** "" | "#RRGGBB" | "gradient:<axis>:<angle>:#A,#B" → CSS background, or "" for system. */
-export function backgroundCss(token: string): string {
-  if (/^#[0-9a-f]{6}$/i.test(token)) return token;
-  const m = /^gradient:([a-z]+):(\d+(?:\.\d+)?):(#[0-9a-f]{6}),(#[0-9a-f]{6})$/i.exec(token || "");
-  if (!m) return "";
-  const [, axis, angle, a, b] = m;
-  if (axis === "radial") return `radial-gradient(circle, ${a}, ${b})`;
-  const deg = ({ horizontal: 90, vertical: 180, diagonal: 135 } as Record<string, number>)[axis] ?? parseFloat(angle);
-  return `linear-gradient(${deg}deg, ${a}, ${b})`;
-}
+onSystemThemeChange(() => applyTheme(current));
 
-const darkQuery =
-  typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-darkQuery?.addEventListener?.("change", () => applyAppearance(current.appearance_studio));
-
-function setVar(name: string, value: string) {
-  const root = document.documentElement.style;
-  if (value) root.setProperty(name, value);
-  else root.removeProperty(name);
-}
-
-export function applyAppearance(st: AppearanceStudio) {
-  if (typeof document === "undefined") return;
-  // The shell is a dark UI by default; follow macOS appearance when it reports light.
-  const dark = darkQuery ? darkQuery.matches : true;
-  const pick = (light: string, darkV: string) => backgroundCss(dark ? darkV : light);
-  setVar("--fp-window-bg", pick(st.window_bg_light, st.window_bg_dark));
-  setVar("--fp-card-bg", pick(st.card_bg_light, st.card_bg_dark));
-  setVar("--fp-tile-bg", pick(st.tile_bg_light, st.tile_bg_dark));
-  setVar("--fp-window-blur", st.window_bg_blur > 0 ? `${st.window_bg_blur}px` : "");
-  setVar("--fp-card-blur", st.card_bg_blur > 0 ? `${st.card_bg_blur}px` : "");
-  setVar("--fp-tile-blur", st.tile_bg_blur > 0 ? `${st.tile_bg_blur}px` : "");
-  const body = document.body.classList;
-  body.toggle("fp-has-window-bg", !!pick(st.window_bg_light, st.window_bg_dark));
-  body.toggle("fp-has-card-bg", !!pick(st.card_bg_light, st.card_bg_dark));
-  body.toggle("fp-has-tile-bg", !!pick(st.tile_bg_light, st.tile_bg_dark));
-
-  // Header frost
-  const frostTint =
-    st.card_header_frost_tint === "light"
-      ? "rgba(255,255,255,0.28)"
-      : st.card_header_frost_tint === "dark"
-        ? "rgba(0,0,0,0.28)"
-        : st.card_header_frost_tint === "custom" && /^#[0-9a-f]{6}$/i.test(st.card_header_frost_custom_hex)
-          ? `${st.card_header_frost_custom_hex}55`
-          : "transparent";
-  body.toggle("fp-header-frost", st.card_header_frost_enabled);
-  setVar("--fp-header-frost-tint", st.card_header_frost_enabled ? frostTint : "");
+/**
+ * Applies the Light / Dark choice. The old Appearance Studio colors, blurs and header frost
+ * are still read and saved (so older settings files round-trip) but no longer applied; the
+ * thumbnail outline settings live in thumbnailOutline.ts.
+ */
+export function applyTheme(s: Pick<ShopSettings, "appearance_mode">) {
+  applyThemeMode(resolveTheme(s.appearance_mode, systemPrefersDark()));
 }
 
 // --- Branding logo --------------------------------------------------------------

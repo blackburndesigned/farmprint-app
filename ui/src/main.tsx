@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import "./theme.css";
 
 // Suppress default browser/WKWebView context menu ("Reload", "Inspect Element") unless right-clicking an editable text field
 window.addEventListener("contextmenu", (e) => {
