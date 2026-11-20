@@ -169,6 +169,12 @@ export const SettingsModal: React.FC<{
               patch={patch}
               snapshot={snapshot}
               onSnapshotUpdated={onSnapshotUpdated}
+              onSavedNow={(saved) => {
+                // Already saved: update the window and its "unchanged" baseline, so Cancel keeps
+                // it, a later Save doesn't write the old value back, and nothing shows as unsaved.
+                setSettings((prev) => ({ ...prev, ...saved }));
+                setLoadedJson((prev) => (prev ? JSON.stringify({ ...JSON.parse(prev), ...saved }) : prev));
+              }}
             />
           )}
           {tab === "library" && <PrintLibraryTab settings={settings} patch={patch} />}
