@@ -12,7 +12,7 @@
 
 - **Orders.** Add orders by hand, or pull them in from your own web shop if you connect one. Each order shows a picture of the product the way the customer ordered it.
 - **Parts to Print.** Breaks every order down into the individual parts and colors that still need printing.
-- **Printers and plates.** Assign parts to your printers and send them straight to Bambu Studio. Parts land on a plate there, each one named with its order number, part and color.
+- **Printers and plates.** Assign parts to your printers and send them straight to your slicer: Bambu Studio, OrcaSlicer or PrusaSlicer. Parts land on a plate there, each one named with its order number, part and color.
 - **ANDON board.** A big-screen view of what's printing, what's stuck and what needs attention.
 - **Kitting cards.** Printable cards with product pictures and a checkbox parts list for packing each order.
 - **Ready to Ship, History, Overstock and Production Value.** See what's ready to go out, what already went out, leftover parts you can reuse, and what your work is worth.
@@ -71,7 +71,7 @@ In a database file on your own computer. Nothing is uploaded unless you connect 
 Not yet. FarmPrint exports plates for your slicer, and you send them to the printer the way you already do.
 
 **Which slicers work?**
-For now, sending plates straight to the slicer only works with Bambu Studio.
+Bambu Studio, OrcaSlicer and PrusaSlicer. Pick yours under Settings › Print library › Slicer (Bambu Studio is the default). Any other slicer can open the 3MF plate files FarmPrint makes.
 
 **Can I try it with sample data first?**
 Yes. On the welcome screen, click **Explore a sample shop first** (or **Load sample shop**) to try FarmPrint with made-up products, printers and orders. When you're ready to start for real, **Clear sample data** removes it.
