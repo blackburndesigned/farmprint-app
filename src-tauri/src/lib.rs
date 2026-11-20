@@ -467,6 +467,32 @@ fn slicer_object_name(unit: &fp_core::PartUnit) -> String {
     }
 }
 
+/// One plate object per unit, in order: each keeps its own name (order, part, color, unit)
+/// and its own filament color, so a plate can mix orders and colors. Two units can share a
+/// name (the same part on two lines of one order are both unit 1); the later ones get
+/// `-2`, `-3`, ... so every object on the plate can be told apart.
+fn plate_items_for(
+    units_with_meshes: &[(fp_core::PartUnit, String)],
+    meshes: &[fp_mesh::TriangleMesh],
+) -> Vec<PlateBuildItem> {
+    let mut used: HashMap<String, usize> = HashMap::new();
+    units_with_meshes
+        .iter()
+        .zip(meshes)
+        .map(|((unit, _), mesh)| {
+            let base = slicer_object_name(unit);
+            let n = used.entry(base.clone()).or_insert(0);
+            *n += 1;
+            let name = if *n == 1 { base } else { format!("{base}-{n}") };
+            PlateBuildItem {
+                name,
+                filament_hex: unit.filament_hex.clone(),
+                mesh: mesh.clone(),
+            }
+        })
+        .collect()
+}
+
 /// Builds the 3MF plate, writes it to the handoff folder and opens it in the slicer
 /// chosen in Settings (see `slicer`). Returns `(plate path, part count, how it opened)`,
 /// or a plain-language reason when no plate file could be written. Takes no ledger lock.
@@ -485,15 +511,7 @@ fn stage_and_open_plate(
     if meshes.len() != units_with_meshes.len() {
         return Err("some parts have no saved model".to_string());
     }
-    let mut plate_items: Vec<PlateBuildItem> = Vec::new();
-    for ((unit, _), mesh) in units_with_meshes.iter().zip(meshes) {
-        let mesh = mesh.clone();
-        plate_items.push(PlateBuildItem {
-            name: slicer_object_name(unit),
-            filament_hex: unit.filament_hex.clone(),
-            mesh,
-        });
-    }
+    let plate_items = plate_items_for(units_with_meshes, meshes);
     let bytes = build_plate_bytes(&plate_items, bed).map_err(|e| {
         format!(
             "could not build the plate file: {}",
@@ -2762,4 +2780,161 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running FarmPrint tauri application");
+}
+
+#[cfg(test)]
+mod multi_select_handoff_tests {
+    use super::{build_plate_bytes, plate_bed_for, plate_items_for};
+    use fp_core::{models::TransitionRequest, ShopLedger};
+    use fp_mesh::TriangleMesh;
+    use std::io::Read;
+
+    fn cube(s: f32) -> TriangleMesh {
+        TriangleMesh {
+            name: "cube".into(),
+            positions: vec![
+                [0.0, 0.0, 0.0],
+                [s, 0.0, 0.0],
+                [s, s, 0.0],
+                [0.0, s, 0.0],
+                [0.0, 0.0, s],
+                [s, 0.0, s],
+                [s, s, s],
+                [0.0, s, s],
+            ],
+            indices: vec![
+                [0, 2, 1],
+                [0, 3, 2],
+                [4, 5, 6],
+                [4, 6, 7],
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+            ],
+        }
+    }
+
+    fn zip_text(bytes: &[u8], name: &str) -> String {
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut out = String::new();
+        z.by_name(name).unwrap().read_to_string(&mut out).unwrap();
+        out
+    }
+
+    /// A multi-select send: parts from two orders in two colors, including the same part
+    /// from both orders, go out as one action (one plate job) on one plate.
+    #[test]
+    fn one_handoff_from_two_orders_and_two_colors_is_one_job_on_one_plate() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let printer_id = ledger.snapshot().unwrap().printers[0].id.clone();
+        let picked = ["unit-demo-1-base", "unit-demo-2-base", "unit-demo-2-lid"];
+        // The same unit named twice must still move once.
+        let mut ids: Vec<String> = picked.iter().map(|s| s.to_string()).collect();
+        ids.push("unit-demo-2-lid".to_string());
+        let snap = ledger
+            .transition_units(TransitionRequest {
+                unit_ids: ids,
+                to_state: "Printing".into(),
+                printer_id: Some(printer_id.clone()),
+                actor_device: "Test".into(),
+                source_surface: "Parts to Print (selection)".into(),
+                action_label: "Print 3 selected parts".into(),
+                failure_reason: None,
+                failure_note: None,
+                filament_id: None,
+            })
+            .unwrap();
+        let units: Vec<&fp_core::PartUnit> = snap
+            .orders
+            .iter()
+            .flat_map(|o| o.lines.iter())
+            .flat_map(|l| l.units.iter())
+            .filter(|u| picked.contains(&u.id.as_str()))
+            .collect();
+        assert_eq!(units.len(), 3);
+        let job = units[0].plate_job_id.clone().expect("a plate job id");
+        for u in &units {
+            assert_eq!(u.state, "Printing", "{}", u.id);
+            assert_eq!(u.plate_job_id.as_deref(), Some(job.as_str()), "{}", u.id);
+            assert_eq!(u.printer_id.as_deref(), Some(printer_id.as_str()));
+        }
+        // Nothing else joined the job, and each picked unit was moved exactly once.
+        let in_job = snap
+            .orders
+            .iter()
+            .flat_map(|o| o.lines.iter())
+            .flat_map(|l| l.units.iter())
+            .filter(|u| u.plate_job_id.as_deref() == Some(job.as_str()))
+            .count();
+        assert_eq!(in_job, 3);
+        let moved: Vec<&str> = snap
+            .flow_events
+            .iter()
+            .filter(|e| {
+                e.to_state == "Printing" && e.source_surface == "Parts to Print (selection)"
+            })
+            .filter_map(|e| e.unit_id.as_deref())
+            .collect();
+        assert_eq!(moved.len(), 3, "{moved:?}");
+        let orders: std::collections::HashSet<_> = units.iter().map(|u| &u.order_id).collect();
+        let colors: std::collections::HashSet<_> = units.iter().map(|u| &u.filament_hex).collect();
+        assert_eq!((orders.len(), colors.len()), (2, 2));
+
+        // The plate: one object per unit, each with its own name and color.
+        let with_mesh = ledger.units_by_ids(&picked.map(String::from)).unwrap();
+        assert_eq!(with_mesh.len(), 3);
+        let meshes: Vec<TriangleMesh> = with_mesh.iter().map(|_| cube(20.0)).collect();
+        let items = plate_items_for(&with_mesh, &meshes);
+        let mut names: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+        names.sort();
+        let mut want: Vec<String> = with_mesh
+            .iter()
+            .map(|(u, _)| {
+                format!(
+                    "{}_{}_{}_{}",
+                    u.order_code,
+                    u.part_name.replace(' ', "_"),
+                    u.filament_name.replace(' ', "_"),
+                    u.unit_index
+                )
+            })
+            .collect();
+        want.sort();
+        assert_eq!(names, want);
+        assert_eq!(names.iter().filter(|n| n.contains("_Base_")).count(), 2);
+        for (item, (u, _)) in items.iter().zip(&with_mesh) {
+            assert_eq!(item.filament_hex, u.filament_hex);
+            assert!(item.name.contains(&u.filament_name.replace(' ', "_")));
+        }
+        let bytes = build_plate_bytes(&items, plate_bed_for(Some(256.0), Some(256.0))).unwrap();
+        let model = zip_text(&bytes, "3D/3dmodel.model");
+        let cfg = zip_text(&bytes, "Metadata/model_settings.config");
+        for n in &names {
+            assert_eq!(model.matches(&format!("name=\"{n}\"")).count(), 1, "{n}");
+            assert!(cfg.contains(&format!("value=\"{n}\"")), "{n}");
+        }
+        assert_eq!(model.matches("<item ").count(), 3);
+
+        // The same part on two lines of one order shares a name; the second gets "-2".
+        let twice = vec![with_mesh[0].clone(), with_mesh[0].clone()];
+        let named: Vec<String> = plate_items_for(&twice, &meshes[..2])
+            .into_iter()
+            .map(|i| i.name)
+            .collect();
+        assert_eq!(named[1], format!("{}-2", named[0]));
+
+        // Too many for the bed: the existing bed check refuses the plate.
+        let big: Vec<TriangleMesh> = with_mesh.iter().map(|_| cube(150.0)).collect();
+        let err = build_plate_bytes(
+            &plate_items_for(&with_mesh, &big),
+            plate_bed_for(Some(256.0), Some(256.0)),
+        )
+        .unwrap_err();
+        assert!(err.contains("bed"), "{err}");
+    }
 }

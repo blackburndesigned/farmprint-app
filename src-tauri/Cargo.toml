@@ -39,3 +39,7 @@ windows = { version = "0.58", features = ["Security_Credentials_UI", "Foundation
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+# Reads plate files back in tests (same version fp-mesh writes them with).
+zip = { version = "0.6", default-features = false, features = ["deflate"] }

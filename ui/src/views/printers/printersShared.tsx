@@ -47,7 +47,14 @@ export const PartTile64: React.FC<{
   onRequestFailureReason?: (unitIds: string[], label: string) => void;
   /** Thumbnail edge in px. Default 52 inside a 64 tile; Parts to Print passes 76 (PrintGroupsPanel.swift `tile`). */
   thumbSize?: number;
-}> = ({ unit, order, onTransition, onSelectUnit, sourceSurface, showOutcomeButtons = true, onRequestFailureReason, thumbSize }) => {
+  /** Multi-select (Parts to Print): shows a checkbox on hover, and always while selected. */
+  selected?: boolean;
+  /** Checkbox clicked (Shift held = range). Set to make the tile selectable. */
+  onCheckClick?: (e: React.MouseEvent) => void;
+  /** Runs before the tile's own click; return true when it handled the click
+   *  (Cmd/Ctrl- or Shift-click selecting), so the part menu doesn't open. */
+  onSelectClick?: (e: React.MouseEvent) => boolean;
+}> = ({ unit, order, onTransition, onSelectUnit, sourceSurface, showOutcomeButtons = true, onRequestFailureReason, thumbSize, selected = false, onCheckClick, onSelectClick }) => {
   const thumb = thumbSize ?? 52;
   const box = (thumbSize ?? 59) + 10; // border-box: 2.5px border + padding room; default = old 64px content + border
   const customerLabel = order?.customer_name || unit.customer_name || unit.order_code;
@@ -64,15 +71,38 @@ export const PartTile64: React.FC<{
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: thumbSize ? box + 4 : 68 }}>
       <div
-        onClick={(e) => { if (onSelectUnit) { e.stopPropagation(); onSelectUnit(unit, e); } }}
+        className={onCheckClick ? `fp-selectable-tile${selected ? " is-selected" : ""}` : undefined}
+        onClick={(e) => {
+          if (onSelectClick?.(e)) { e.stopPropagation(); return; }
+          if (onSelectUnit) { e.stopPropagation(); onSelectUnit(unit, e); }
+        }}
         title={`${unit.part_name} · ${unit.filament_name} · ${customerLabel} (${orderCodeLabel})`}
-        style={{ position: "relative", width: box, height: box, boxSizing: "border-box", borderRadius: 10, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: hideRing ? "2.5px solid transparent" : `2.5px solid ${step.bg}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}
+        style={{ position: "relative", width: box, height: box, boxSizing: "border-box", borderRadius: 10, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: hideRing ? "2.5px solid transparent" : `2.5px solid ${step.bg}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", boxShadow: selected ? "0 0 0 3px #0a84ff" : undefined }}
       >
         <PartThumbnail3D partName={unit.part_name} partId={unit.part_id} productId={unit.product_id} colorHex={unit.filament_hex} size={thumb} statusHex={step.bg} />
         <span style={{ position: "absolute", top: 4, left: 4, width: 9, height: 9, borderRadius: "50%", background: unit.filament_hex, border: "1px solid rgba(255,255,255,0.65)" }} />
         <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "8px 3px 2px", background: "linear-gradient(transparent, rgba(0,0,0,0.72))", fontSize: 9.5, fontWeight: 700, color: "#fff", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {unit.part_name}
         </span>
+        {onCheckClick && (
+          <span
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={`Select ${unit.part_name} for ${customerLabel}`}
+            tabIndex={0}
+            className="fp-select-check"
+            onClick={(e) => { e.stopPropagation(); onCheckClick(e); }}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+                onCheckClick(e as unknown as React.MouseEvent);
+              }
+            }}
+          >
+            {selected ? "✓" : ""}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 9.5, fontWeight: 600, color: "rgba(235,235,245,0.78)", maxWidth: 68, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
         {customerLabel}
