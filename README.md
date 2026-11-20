@@ -2,7 +2,7 @@
 
 **A free production tracker for 3D print farms.** FarmPrint keeps track of every order, every part that still needs printing, and which printer is doing what, so nothing falls through the cracks between "order came in" and "box shipped."
 
-> **Early release.** FarmPrint is at version 0.9 and still changing quickly. Back up anything important, and please [report bugs](https://github.com/blackburndesigned/farmprint-releases/issues/new/choose) when you hit them.
+> **Early release.** FarmPrint is at version 0.9 and still changing quickly. Back up anything important, and please [report bugs](https://github.com/blackburndesigned/farmprint-app/issues/new/choose) when you hit them.
 
 ![All Orders, showing each order with pictures of what the customer ordered](screenshots/all-orders.png)
 ![The ANDON board, with every order sorted by stage](screenshots/andon.png)
@@ -22,7 +22,7 @@ Your data stays on your computer. FarmPrint doesn't need an account, and it does
 
 ## Download
 
-Grab the latest version from the [Releases page](https://github.com/blackburndesigned/farmprint-releases/releases/latest).
+Grab the latest version from the [Releases page](https://github.com/blackburndesigned/farmprint-app/releases/latest).
 
 | Computer | File to download |
 |---|---|
@@ -77,7 +77,7 @@ For now, sending plates straight to the slicer only works with Bambu Studio.
 Yes. On the welcome screen, click **Explore a sample shop first** (or **Load sample shop**) to try FarmPrint with made-up products, printers and orders. When you're ready to start for real, **Clear sample data** removes it.
 
 **I found a bug or have an idea.**
-Please use the [bug report and idea forms](https://github.com/blackburndesigned/farmprint-releases/issues/new/choose). In the app you can also use **Help → Report a Bug**, which fills in your version for you. Please don't post customer names or addresses, and blur screenshots that show them.
+Please use the [bug report and idea forms](https://github.com/blackburndesigned/farmprint-app/issues/new/choose). In the app you can also use **Help → Report a Bug**, which fills in your version for you. Please don't post customer names or addresses, and blur screenshots that show them.
 
 **Who made this?**
 One person who runs a small print farm and built FarmPrint to run his own shop.

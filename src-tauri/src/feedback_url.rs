@@ -1,8 +1,8 @@
 //! GitHub issue-form URLs for Help > Report a Bug / Request a Feature.
-//! Field ids `version` and `os` must match the forms in farmprint-releases.
+//! Field ids `version` and `os` must match the forms in farmprint-app.
 
 pub const NEW_ISSUE_BASE: &str =
-    "https://github.com/blackburndesigned/farmprint-releases/issues/new";
+    "https://github.com/blackburndesigned/farmprint-app/issues/new";
 pub const BUG_TEMPLATE: &str = "bug_report.yml";
 pub const FEATURE_TEMPLATE: &str = "feature_request.yml";
 
@@ -110,7 +110,7 @@ mod tests {
     fn bug_url_for_macos_release() {
         assert_eq!(
             issue_url(IssueKind::Bug, "0.9.15", "Mac"),
-            "https://github.com/blackburndesigned/farmprint-releases/issues/new?template=bug_report.yml&version=0.9.15&os=Mac"
+            "https://github.com/blackburndesigned/farmprint-app/issues/new?template=bug_report.yml&version=0.9.15&os=Mac"
         );
     }
 
@@ -121,7 +121,7 @@ mod tests {
             assert_eq!(
                 url,
                 format!(
-                    "https://github.com/blackburndesigned/farmprint-releases/issues/new?template=bug_report.yml&version=0.9.15&os={os}"
+                    "https://github.com/blackburndesigned/farmprint-app/issues/new?template=bug_report.yml&version=0.9.15&os={os}"
                 )
             );
         }
@@ -135,7 +135,7 @@ mod tests {
             let url = issue_url(IssueKind::Feature, "0.9.15", os);
             assert_eq!(
                 url,
-                "https://github.com/blackburndesigned/farmprint-releases/issues/new?template=feature_request.yml"
+                "https://github.com/blackburndesigned/farmprint-app/issues/new?template=feature_request.yml"
             );
         }
     }
@@ -157,7 +157,7 @@ mod tests {
         let url = issue_url(IssueKind::Bug, "0.9.15+dev", "Mac OS");
         assert_eq!(
             url,
-            "https://github.com/blackburndesigned/farmprint-releases/issues/new?template=bug_report.yml&version=0.9.15%2Bdev&os=Mac%20OS"
+            "https://github.com/blackburndesigned/farmprint-app/issues/new?template=bug_report.yml&version=0.9.15%2Bdev&os=Mac%20OS"
         );
     }
 
