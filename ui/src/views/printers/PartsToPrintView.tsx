@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "../../tauriInvoke";
 import { Order, OverstockItem, PartUnit, Product, ShopSnapshot } from "../../types";
 import { ProductCompositeThumbnail3D } from "../../components/PartThumbnail3D";
@@ -7,6 +7,46 @@ import { csvText, notifyBanner, notifyError, saveTextFile } from "../../uiFeedba
 import { PartTile64, type PrintersQueueCommonProps, type SuggestedPrintGroup, isPrinterReadyFirst, prefersLightOnHex } from "./printersShared";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
 import { useShopSettings } from "../../settingsStore";
+import { modKey, osKind } from "../../platform";
+import { isTypingTarget } from "../../uiFeedback";
+import {
+  groupState,
+  isToggleClick,
+  pruneSelection,
+  selectRange,
+  selectedInOrder,
+  selectionSummary,
+  toggleGroup,
+  toggleUnit,
+  type Selection,
+} from "./partSelection";
+
+/** Header checkbox for a group: checked, unchecked, or mixed when only some are selected. */
+const GroupCheck: React.FC<{ sel: Selection; ids: string[]; label: string; onToggle: () => void }> = ({
+  sel,
+  ids,
+  label,
+  onToggle,
+}) => {
+  const ref = useRef<HTMLInputElement | null>(null);
+  const state = groupState(sel, ids);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = state === "some";
+  }, [state]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={label}
+      title={label}
+      checked={state === "all"}
+      aria-checked={state === "some" ? "mixed" : state === "all"}
+      onChange={onToggle}
+      onClick={(e) => e.stopPropagation()}
+      style={{ width: 16, height: 16, margin: 0, flexShrink: 0, cursor: "pointer", accentColor: "#0a84ff" }}
+    />
+  );
+};
 
 export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
   snapshot,
@@ -145,6 +185,92 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
     [waitingUnits]
   );
 
+  // By Order view: each order with waiting parts, its parts shown in tile order.
+  const orderGroups = useMemo(
+    () =>
+      snapshot.orders
+        .map((ord) => {
+          const allOrdUnits = ord.lines
+            .flatMap((l) => l.units)
+            .filter((u) => !isThumbnailOnlyPart(u.part_name, productById.get(u.product_id)));
+          const ordUnits = allOrdUnits.filter(
+            (u) =>
+              (u.state === "Queued" || u.state === "Staged") &&
+              (productFilter === "ALL" || u.product_id === productFilter)
+          );
+          return { ord, allOrdUnits, ordUnits };
+        })
+        .filter((g) => g.ordUnits.length > 0),
+    [snapshot.orders, productById, productFilter]
+  );
+
+  // --- Multi-select: pick single parts from any order or color and send them as one job.
+  const [selected, setSelected] = useState<Selection>(() => new Set<string>());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  // Tiles in the order they are shown, for Shift-click ranges across groups.
+  const shownUnits = useMemo(
+    () => (sortMode === "color" ? colorGroups.flatMap((g) => g.units) : orderGroups.flatMap((g) => g.ordUnits)),
+    [sortMode, colorGroups, orderGroups]
+  );
+  const shownIds = useMemo(() => shownUnits.map((u) => u.id), [shownUnits]);
+  const waitingIdSet = useMemo(() => new Set(waitingUnits.map((u) => u.id)), [waitingUnits]);
+  // Parts that stop waiting (sent to a printer, removed, filtered out) leave the
+  // selection, which is how it clears after a send. A cancelled printer pick keeps it.
+  useEffect(() => {
+    setSelected((s) => pruneSelection(s, waitingIdSet));
+  }, [waitingIdSet]);
+  const clearSelection = () => {
+    setSelected(new Set<string>());
+    setAnchorId(null);
+  };
+  const selectedUnits = useMemo(() => selectedInOrder(selected, shownUnits), [selected, shownUnits]);
+  useEffect(() => {
+    if (selected.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // A dialog (the printer picker, a part menu) or a text field gets Esc first.
+      if (document.querySelector('[role="dialog"], [role="alertdialog"], .fp-modal-backdrop')) return;
+      if (isTypingTarget(e.target)) return;
+      setSelected(new Set<string>());
+      setAnchorId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected.size]);
+  const mac = osKind() === "mac";
+  const rangeOrToggle = (u: PartUnit, shift: boolean) => {
+    setSelected((s) => (shift ? selectRange(s, shownIds, anchorId, u.id) : toggleUnit(s, u.id)));
+    setAnchorId(u.id);
+  };
+  const selectProps = (u: PartUnit) => ({
+    selected: selected.has(u.id),
+    onCheckClick: (e: React.MouseEvent) => rangeOrToggle(u, e.shiftKey),
+    onSelectClick: (e: React.MouseEvent) => {
+      if (e.shiftKey || isToggleClick(e, mac)) {
+        rangeOrToggle(u, e.shiftKey);
+        return true;
+      }
+      return false;
+    },
+  });
+  const groupToggle = (ids: string[]) => () => setSelected((s) => toggleGroup(s, ids));
+  const sendSelection = () => {
+    const units = selectedUnits;
+    if (units.length === 0) return;
+    // One request, so every part shares one plate job and one plate in the slicer.
+    // No printer is preset: the picker always asks.
+    onTransition({
+      unit_ids: units.map((u) => u.id),
+      to_state: "Printing",
+      printer_id: null,
+      actor_device: "Mac Studio (FarmPrint)",
+      source_surface: "Parts to Print (selection)",
+      action_label: `Print ${units.length} selected part${units.length === 1 ? "" : "s"}`,
+      failure_reason: null,
+      failure_note: null,
+    });
+  };
+
   const renderColorCard = (
     grp: SuggestedPrintGroup,
     surface: string,
@@ -154,6 +280,8 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
     const ovMatch = findOverstockMatch(grp.units[0]);
     // The hint shows inside Suggested Groups only, and only when the setting is on.
     const hint = surface === "Suggested Groups" ? grp.suggestedPrinter : undefined;
+    // Multi-select lives on the page itself, not in the Suggested Groups window.
+    const selectable = !closeOnPrint;
     return (
       <div
         key={grp.key}
@@ -179,7 +307,15 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
             gap: 8,
           }}
         >
-          <div style={{ minWidth: 0 }}>
+          {selectable && (
+            <GroupCheck
+              sel={selected}
+              ids={grp.units.map((u) => u.id)}
+              label={`Select all ${grp.units.length} ${grp.filamentName} parts`}
+              onToggle={groupToggle(grp.units.map((u) => u.id))}
+            />
+          )}
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
                 fontSize: 13.5,
@@ -293,6 +429,7 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
               sourceSurface={surface}
               showOutcomeButtons={false}
               thumbSize={76}
+              {...(selectable ? selectProps(u) : {})}
             />
           ))}
         </div>
@@ -314,7 +451,8 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
         <div>
           <div style={{ fontSize: 17, fontWeight: 800 }}>Parts to Print</div>
           <div style={{ fontSize: 12, color: "rgba(235,235,245,0.62)" }}>
-            {waitingUnits.length} part(s) across {distinctColors} color(s) left to print
+            {waitingUnits.length} part(s) across {distinctColors} color(s) left to print · {modKey()}-click parts to
+            pick them from any order or color, Shift-click for a range
           </div>
         </div>
         <select
@@ -376,28 +514,7 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
       >
         {sortMode === "color"
           ? colorGroups.map((grp) => renderColorCard(grp, "Parts to Print"))
-          : snapshot.orders
-              .filter((o) =>
-                o.lines.some((l) =>
-                  l.units.some(
-                    (u) =>
-                      !isThumbnailOnlyPart(u.part_name, productById.get(u.product_id)) &&
-                      (u.state === "Queued" || u.state === "Staged") &&
-                      (productFilter === "ALL" || u.product_id === productFilter)
-                  )
-                )
-              )
-              .map((ord) => {
-                const allOrdUnits = ord.lines
-                  .flatMap((l) => l.units)
-                  .filter(
-                    (u) => !isThumbnailOnlyPart(u.part_name, productById.get(u.product_id))
-                  );
-                const ordUnits = allOrdUnits.filter(
-                  (u) =>
-                    (u.state === "Queued" || u.state === "Staged") &&
-                    (productFilter === "ALL" || u.product_id === productFilter)
-                );
+          : orderGroups.map(({ ord, allOrdUnits, ordUnits }) => {
                 const line = ord.lines[0];
                 const prod = snapshot.products.find((p) => p.id === line?.product_id);
                 const compositeParts =
@@ -430,6 +547,12 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <GroupCheck
+                        sel={selected}
+                        ids={ordUnits.map((u) => u.id)}
+                        label={`Select all ${ordUnits.length} waiting parts for ${ord.customer_name}`}
+                        onToggle={groupToggle(ordUnits.map((u) => u.id))}
+                      />
                       <ProductCompositeThumbnail3D
                         productName={line?.product_name || ord.customer_name}
                         parts={compositeParts}
@@ -539,6 +662,7 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                               onSelectUnit={onSelectUnit}
                               sourceSurface="Parts to Print"
                               showOutcomeButtons={false}
+                              {...selectProps(u)}
                             />
                             {ov && (
                               <button
@@ -602,6 +726,17 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
               {colorGroups.map((grp) => renderColorCard(grp, "Suggested Groups", true))}
             </div>
           </div>
+        </div>
+      )}
+      {selectedUnits.length > 0 && (
+        <div className="fp-selection-bar" role="region" aria-label="Selected parts">
+          <span>{selectionSummary(selectedUnits)}</span>
+          <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={sendSelection}>
+            Send…
+          </button>
+          <button type="button" className="fp-btn fp-btn-sm" onClick={clearSelection} title="Clear the selection (Esc)">
+            Clear
+          </button>
         </div>
       )}
     </div>

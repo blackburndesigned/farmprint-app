@@ -651,7 +651,10 @@ impl ShopLedger {
         Ok(out)
     }
 
-    pub fn transition_units(&mut self, req: TransitionRequest) -> CoreResult<ShopSnapshot> {
+    pub fn transition_units(&mut self, mut req: TransitionRequest) -> CoreResult<ShopSnapshot> {
+        // Each unit moves once per action, even if the request names it twice.
+        let mut seen = std::collections::HashSet::new();
+        req.unit_ids.retain(|id| seen.insert(id.clone()));
         let now = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
         let tx = self.conn.transaction()?;
         // One batch id per action, so Undo reverts every unit this call moved.
