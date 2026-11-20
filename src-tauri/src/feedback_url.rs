@@ -1,8 +1,7 @@
 //! GitHub issue-form URLs for Help > Report a Bug / Request a Feature.
 //! Field ids `version` and `os` must match the forms in farmprint-app.
 
-pub const NEW_ISSUE_BASE: &str =
-    "https://github.com/blackburndesigned/farmprint-app/issues/new";
+pub const NEW_ISSUE_BASE: &str = "https://github.com/blackburndesigned/farmprint-app/issues/new";
 pub const BUG_TEMPLATE: &str = "bug_report.yml";
 pub const FEATURE_TEMPLATE: &str = "feature_request.yml";
 
