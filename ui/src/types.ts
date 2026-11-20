@@ -196,6 +196,8 @@ export interface FlowEvent {
   batch_id?: string | null;
   /** Set once the action was undone. */
   undone?: boolean;
+  /** Plate job the part was in just before this event (older backends leave it out). */
+  prev_plate_job_id?: string | null;
 }
 
 export type TransitionEvent = FlowEvent;

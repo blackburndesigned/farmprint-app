@@ -335,6 +335,10 @@ pub struct FlowEvent {
     /// Set once the event's action was undone. Undone events are left out of analytics.
     #[serde(default)]
     pub undone: bool,
+    /// Plate job the part was in just before this event (read from the existing
+    /// `prev_plate_job_id` column). Lets the Flow page rebuild a job's history.
+    #[serde(default)]
+    pub prev_plate_job_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

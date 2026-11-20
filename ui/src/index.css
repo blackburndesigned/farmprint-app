@@ -219,6 +219,10 @@ body.fp-wall-mode .fp-main .fp-scroll > div[style*="min-width: 260px"] {
 .fp-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); gap: 10px; }
 .fp-modal-title { font-size: 15px; font-weight: 700; }
 .fp-modal-body { padding: 14px 16px; overflow-y: auto; }
+/* Shop Flow rows open the job detail */
+.fp-flow-row { transition: border-color 0.18s var(--ease-quick), background 0.18s var(--ease-quick); }
+.fp-flow-row:hover { border-color: rgba(10, 132, 255, 0.55) !important; }
+.fp-flow-row:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
 /* BottomTabBar.swift (18pt corner radius, VStack icon + 10pt bold label, accent 0.22 active) */
 .fp-dock-wrap {
   position: fixed;
