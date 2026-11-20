@@ -293,14 +293,20 @@ export const ShopOrderCard: React.FC<{
           />
         </div>
 
-        {/* Square Part Tiles Grid with Status Ring Borders */}
+        {/* Square Part Tiles Grid with Status Ring Borders. Up to `partColumns` tiles per row;
+            a card narrower than that (e.g. a narrow ANDON lane) wraps to fewer columns
+            instead of clipping the last tile. */}
         <div
           style={{
             width: "100%",
+            maxWidth: partColumns * tileSide + (partColumns - 1) * 6,
+            marginLeft: "auto",
+            marginRight: "auto",
+            boxSizing: "border-box",
             display: "grid",
-            gridTemplateColumns: `repeat(${partColumns}, ${tileSide}px)`,
+            gridTemplateColumns: `repeat(auto-fill, ${tileSide}px)`,
             gap: 6,
-            justifyContent: "space-between",
+            justifyContent: "start",
             marginTop: 2,
           }}
         >
