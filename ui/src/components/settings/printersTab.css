@@ -1,0 +1,31 @@
+/* --- Settings › Printers: card grid + edit sheet --- */
+.fp-printer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.fp-printer-tile {
+  display: flex; flex-direction: column; align-items: stretch; text-align: left; padding: 0; overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--bg-card); color: var(--text-primary);
+  font: inherit; cursor: pointer; min-height: 140px;
+  transition: transform 0.22s var(--ease-quick), border-color 0.18s var(--ease-quick), box-shadow 0.22s var(--ease-quick);
+}
+.fp-printer-tile:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22); }
+.fp-printer-tile:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
+.fp-printer-tile-art { position: relative; height: 40px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-subtle); }
+.fp-printer-tile-chip {
+  position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+}
+.fp-printer-tile-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fp-printer-tile-name { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-printer-tile-sub { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-printer-tile-add {
+  align-items: center; justify-content: center; gap: 6px; border-style: dashed; border-width: 1.5px;
+  background: transparent; color: var(--text-secondary);
+}
+.fp-printer-tile-add:hover { color: var(--text-primary); }
+.fp-printer-sheet-head { display: flex; align-items: center; gap: 14px; padding: 16px; border-bottom: 1px solid var(--border-subtle); }
+.fp-form-group { border-radius: 10px; border: 1px solid var(--border-subtle); background: var(--bg-card); overflow: hidden; }
+.fp-form-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px;
+  padding: 6px 12px; font-size: 12.5px;
+}
+.fp-form-row + .fp-form-row { border-top: 1px solid var(--border-subtle); }
+.fp-form-row > span:first-child { color: var(--text-secondary); font-weight: 500; flex-shrink: 0; }
