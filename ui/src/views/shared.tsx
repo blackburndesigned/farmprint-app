@@ -34,7 +34,9 @@ export const LineCompositeThumb: React.FC<{
   size?: number;
   /** Pixel size the picture is drawn at (default 240). Pass ~640 for a print-size picture. */
   renderPx?: number;
-}> = ({ line, product, size = 160, renderPx }) => {
+  /** Skip the Settings outline (printed paper). */
+  noOutline?: boolean;
+}> = ({ line, product, size = 160, renderPx, noOutline }) => {
   const parts = line.units
     .filter((u) => !isThumbnailOnlyUnit(u))
     .map((u) => ({
@@ -65,6 +67,7 @@ export const LineCompositeThumb: React.FC<{
         // product's default colorway, so always tint live from the line's units.
         liveTint
         renderPx={renderPx}
+        noOutline={noOutline}
       />
     </div>
   );

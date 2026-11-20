@@ -18,6 +18,7 @@ import type { CameraState } from "./viewportCamera";
 import type { OrderThumbnailCapture, ViewCamera } from "./components/OrderViewport3D";
 import { cameraFromJson } from "./components/orderModelCache";
 import { OrderRePoseModal, renderOrderThumbnail } from "./lazy3D";
+import { useOutlinedSrc } from "./thumbnailOutline";
 
 export type OrderThumbSource = "new_order" | "re_pose" | "website" | "recolor";
 
@@ -245,9 +246,12 @@ export const OrderLinePicture: React.FC<{
   fallback: React.ReactNode;
   /** Draw LineCompositeThumb's rounded frame around the picture (order details). */
   framed?: boolean;
-}> = ({ order, line, product, filaments, size, fallback, framed }) => {
+  /** Skip the Settings outline (printed paper). */
+  noOutline?: boolean;
+}> = ({ order, line, product, filaments, size, fallback, framed, noOutline }) => {
   const saved = useOrderLineThumb(order.id, line.id);
   const stale = !!saved && thumbColorsStale(saved, line);
+  const shown = useOutlinedSrc(saved && !stale ? saved.pngDataUrl : "", framed ? Math.round(size * 0.9) : size, undefined, noOutline);
 
   useEffect(() => {
     if (saved === undefined || !product || !filaments) return;
@@ -257,7 +261,7 @@ export const OrderLinePicture: React.FC<{
   if (!saved || stale) return <>{fallback}</>;
   const img = (
     <img
-      src={saved.pngDataUrl}
+      src={shown}
       alt={line.product_name}
       draggable={false}
       style={{ width: framed ? Math.round(size * 0.9) : size, height: framed ? Math.round(size * 0.9) : size, objectFit: "contain", display: "block" }}
