@@ -8,6 +8,8 @@ import { CreatedCatalogProductPayload } from "../../components/ProductImportModa
 import { fmtUsd, LineCompositeThumb, PartTileCard } from "../shared";
 import { OrderLinePicture, OrderLineRePoseModal } from "../../orderLineThumbs";
 import { OrderLine3DViewer } from "../../lazy3D";
+import { Maximize2, PenLine } from "lucide-react";
+import { Icon } from "../../icons";
 
 /** A pending "Set Item Status" change waiting for confirmation. */
 export type UnitStatusConfirm = {
@@ -271,7 +273,7 @@ export const OrderDetailLineCard: React.FC<{
                 color: "#ff9f0a",
               }}
             >
-              ✎ “{line.custom_text}”
+              <Icon icon={PenLine} size={12} /> “{line.custom_text}”
             </span>
           )}
           <span style={{ fontSize: 12, fontWeight: 600, color: "rgba(235,235,245,0.6)" }}>
@@ -342,7 +344,7 @@ export const OrderDetailLineCard: React.FC<{
             }
           />
           <span style={{ position: "absolute", right: 8, bottom: 8, padding: "3px 8px", borderRadius: 999, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 11, fontWeight: 600 }}>
-            ⤢ Enlarge
+            <Icon icon={Maximize2} size={12} /> Enlarge
           </span>
         </button>
         {productById.get(line.product_id) && (

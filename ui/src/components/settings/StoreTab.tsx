@@ -3,6 +3,8 @@ import { askConfirm } from "../../uiFeedback";
 import { ProductShippingSetting, ShippingBoxPreset, ShippingTier, ShipsTogetherRule, ShopSettings, ShopSnapshot } from "../../types";
 import { Check, NumField, Row, Section, type Setter, caption, copyText, inputStyle, sectionTitle } from "./settingsUi";
 import { PublishCatalogSection, ShopAccountSection } from "./StoreAccountSections";
+import { X } from "lucide-react";
+import { Icon } from "../../icons";
 
 // --- Store (link, shop connection, catalog, orders, shipping, boxes) ---
 
@@ -432,7 +434,7 @@ export const StoreTab: React.FC<{
                     setRule(idx, { ...rule, limits: rest });
                   }}
                 >
-                  ✕
+                  <Icon icon={X} size={14} />
                 </button>
               </div>
             ))}

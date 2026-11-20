@@ -8,6 +8,8 @@ import { errorText } from "../errorText";
 import { loadSampleShop } from "./SampleShop";
 import { joinHexAlpha, splitHexAlpha, swatchBackground } from "../platform";
 import { ShopSettings, ShopSnapshot } from "../types";
+import { Lock } from "lucide-react";
+import { Icon } from "../icons";
 
 type Step = "welcome" | "basics" | "printers" | "filament" | "process" | "store" | "done";
 const ORDER: Step[] = ["welcome", "basics", "printers", "filament", "process", "store", "done"];
@@ -271,7 +273,7 @@ export const SetupWizard: React.FC<{
             <div style={{ fontSize: 12.5, opacity: 0.8, marginBottom: 10 }}>Every part moves through these steps. Rename them to fit your shop. Closed is always last.</div>
             {steps.map((st, i) => (
               <div key={st.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                <span style={{ width: 12, height: 12, borderRadius: 3, background: st.color_hex }} />{st.id === "Staged" && <span title="Fixed step: can be renamed or hidden, not deleted" style={{ fontSize: 11 }}>🔒</span>}
+                <span style={{ width: 12, height: 12, borderRadius: 3, background: st.color_hex }} />{st.id === "Staged" && <span title="Fixed step: can be renamed or hidden, not deleted" style={{ display: "inline-flex" }}><Icon icon={Lock} size={12} /></span>}
                 <input style={{ ...input, flex: 1 }} value={st.name} onChange={(e) => setSteps(steps.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
               </div>
             ))}

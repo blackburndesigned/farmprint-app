@@ -200,6 +200,10 @@ body.fp-wall-mode .fp-main .fp-scroll > div[style*="min-width: 260px"] {
   color: var(--text-primary); cursor: pointer; transition: transform 0.16s var(--ease-quick), background 0.16s ease;
 }
 .fp-btn:hover { background: rgba(255, 255, 255, 0.11); }
+/* Lucide icons (icons.tsx): sit on the text line, never shrink inside flex rows. */
+.fp-icon { flex-shrink: 0; vertical-align: -0.2em; }
+.fp-btn .fp-icon, .fp-inline-icon { vertical-align: middle; }
+.fp-inline-icon { display: inline-flex; align-items: center; gap: 4px; }
 .fp-btn:active { transform: scale(0.97); }
 .fp-btn-sm { padding: 4px 10px; font-size: 11.5px; }
 .fp-btn-ghost { background: transparent; border-color: transparent; }

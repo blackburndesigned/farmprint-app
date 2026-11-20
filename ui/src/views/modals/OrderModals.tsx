@@ -11,6 +11,8 @@ import { KittingCardModal } from "./KittingCardModal";
 import { BulkOrderConfirmModal } from "./BulkOrderConfirmModal";
 import { OrderEditorSheet, useOrderEditorState } from "./OrderEditorSheet";
 import { OrderDetailLineCard, OrderSummaryCard, type UnitStatusConfirm } from "./OrderDetailParts";
+import { ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { Icon } from "../../icons";
 
 /**
  * Full `OrderDetailView.swift` + `OrderEditorSheet.swift` + `AssignPrinterForPrintingSheet.swift` + `KittingCardPrint.swift` 1:1 port.
@@ -134,7 +136,7 @@ export const OrderModals: React.FC<{
                   onClick={onCloseSelectedOrder}
                   title="Close order details and return to Orders board"
                 >
-                  ← Back to Orders
+                  <Icon icon={ArrowLeft} /> Back to Orders
                 </button>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: 17, display: "flex", alignItems: "center", gap: 8 }}>
@@ -174,7 +176,7 @@ export const OrderModals: React.FC<{
                         adjacentOrders.prev && onSelectOrder(adjacentOrders.prev.id)
                       }
                     >
-                      ◀
+                      <Icon icon={ChevronLeft} />
                     </button>
                     <button
                       type="button"
@@ -189,7 +191,7 @@ export const OrderModals: React.FC<{
                         adjacentOrders.next && onSelectOrder(adjacentOrders.next.id)
                       }
                     >
-                      ▶
+                      <Icon icon={ChevronRight} />
                     </button>
                   </>
                 )}
@@ -237,7 +239,7 @@ export const OrderModals: React.FC<{
                   onClick={() => setShowKittingCard(true)}
                   title="Print a 4×6 kitting card for this order"
                 >
-                  🏷️ Print card
+                  <Icon icon={Tag} /> Print card
                 </button>
 
                 <button

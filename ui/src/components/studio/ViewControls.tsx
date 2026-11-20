@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from "react";
 import { FramingPreset } from "../../viewportCamera";
 import { PRESETS, framingPresetName } from "./viewportTypes";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Hand, House, Move, RotateCcw, RotateCw, X } from "lucide-react";
+import { Icon } from "../../icons";
 
 const ctlBtn: React.CSSProperties = {
   minWidth: 32,
@@ -34,7 +36,7 @@ export function ViewControls(p: {
   onKeyIntensity: (key: number) => void;
 }) {
   const verb = p.panMode ? "Pan" : "Rotate";
-  const b = (label: string, title: string, onClick: () => void, active = false) => (
+  const b = (label: React.ReactNode, title: string, onClick: () => void, active = false) => (
     <button type="button" title={title} aria-label={title} aria-pressed={active || undefined} onClick={onClick}
       style={{ ...ctlBtn, ...(active ? { background: "#0a84ff", color: "white", borderColor: "#0a84ff" } : {}) }}>
       {label}
@@ -47,7 +49,7 @@ export function ViewControls(p: {
     window.addEventListener("pointerup", stopJog);
     return () => { window.removeEventListener("blur", stopJog); window.removeEventListener("pointerup", stopJog); stopJog(); };
   }, []);
-  const hold = (label: string, title: string, kind: "orbit" | "zoom" | "roll", sx: number, sy: number) => (
+  const hold = (label: React.ReactNode, title: string, kind: "orbit" | "zoom" | "roll", sx: number, sy: number) => (
     <button type="button" title={`${title} — hold to keep moving`} aria-label={title}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
@@ -93,21 +95,21 @@ export function ViewControls(p: {
     >
       <div style={{ ...row, justifyContent: "space-between" }}>
         {p.open && <span style={{ fontSize: 11, opacity: 0.6, paddingLeft: 2 }}>View</span>}
-        {b(p.open ? "×" : "✥", p.open ? "Hide view controls" : "Show view controls", p.onToggle)}
+        {b(p.open ? <Icon icon={X} size={14} /> : <Icon icon={Move} size={14} />, p.open ? "Hide view controls" : "Show view controls", p.onToggle)}
       </div>
       {p.open && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 32px)", gap: 4, justifyContent: "center" }}>
-            {hold("⟲", "Spin counterclockwise ([)", "roll", -1, 0)}{hold("▲", `${verb} up (↑)`, "orbit", 0, 1)}{hold("⟳", "Spin clockwise (])", "roll", 1, 0)}
-            {hold("◀", `${verb} left (←)`, "orbit", -1, 0)}
-            {b("⌂", "Reset view (0)", p.onReset)}
-            {hold("▶", `${verb} right (→)`, "orbit", 1, 0)}
-            <span />{hold("▼", `${verb} down (↓)`, "orbit", 0, -1)}<span />
+            {hold(<Icon icon={RotateCcw} size={14} />, "Spin counterclockwise ([)", "roll", -1, 0)}{hold(<Icon icon={ChevronUp} size={14} />, `${verb} up (↑)`, "orbit", 0, 1)}{hold(<Icon icon={RotateCw} size={14} />, "Spin clockwise (])", "roll", 1, 0)}
+            {hold(<Icon icon={ChevronLeft} size={14} />, `${verb} left (←)`, "orbit", -1, 0)}
+            {b(<Icon icon={House} size={14} />, "Reset view (0)", p.onReset)}
+            {hold(<Icon icon={ChevronRight} size={14} />, `${verb} right (→)`, "orbit", 1, 0)}
+            <span />{hold(<Icon icon={ChevronDown} size={14} />, `${verb} down (↓)`, "orbit", 0, -1)}<span />
           </div>
           <div style={row}>
             {hold("−", "Zoom out (−)", "zoom", -1, 0)}
             {hold("+", "Zoom in (+)", "zoom", 1, 0)}
-            {b("✋", p.panMode ? "Pan mode on — arrows pan. Click for rotate" : "Pan mode: make the arrows pan", () => p.onPanMode(!p.panMode), p.panMode)}
+            {b(<Icon icon={Hand} size={14} />, p.panMode ? "Pan mode on — arrows pan. Click for rotate" : "Pan mode: make the arrows pan", () => p.onPanMode(!p.panMode), p.panMode)}
           </div>
           <div style={row}>
             {PRESETS.map((preset) => b(framingPresetName(preset), `${framingPresetName(preset)} view`, () => p.onPreset(preset)))}

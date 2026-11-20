@@ -9,6 +9,8 @@ import { useShopSettings } from "../settingsStore";
 import { parsePriceCents } from "../shopHelpers";
 import { askConfirm, notifyError } from "../uiFeedback";
 import { actorDevice } from "../deviceLabel";
+import { Package } from "lucide-react";
+import { Icon } from "../icons";
 
 type PartRole = "Prints" | "Picture only" | "Color only";
 
@@ -284,7 +286,7 @@ export const ProductsCatalogView: React.FC<{
                         textOverflow: "ellipsis",
                       }}
                     >
-                      📦 {boxLabel(prod.default_box_name)}
+                      <Icon icon={Package} size={12} /> {boxLabel(prod.default_box_name)}
                     </span>
                   )}
                 </div>

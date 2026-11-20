@@ -12,6 +12,8 @@ import { analyzeClientMeshHealth } from "./productImport/meshHealth";
 import { DetailsStep } from "./productImport/DetailsStep";
 import { PartsStep } from "./productImport/PartsStep";
 import { ViewsStep } from "./productImport/ViewsStep";
+import { Crosshair, Package } from "lucide-react";
+import { Icon } from "../icons";
 
 export const ProductImportModal3D: React.FC<ProductImportModal3DProps> = ({
   open = true,
@@ -513,7 +515,7 @@ export const ProductImportModal3D: React.FC<ProductImportModal3DProps> = ({
           }}
         />
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
-          <span style={{ fontSize: 18 }} aria-hidden>⌖</span>
+          <span style={{ display: "inline-flex" }} aria-hidden><Icon icon={Crosshair} size={18} /></span>
           <span style={{ fontSize: 17, fontWeight: 600 }}>
             {editingDraft ? `Product Editor — ${editingDraft.name}` : "Product Editor"}
           </span>
@@ -539,7 +541,7 @@ export const ProductImportModal3D: React.FC<ProductImportModal3DProps> = ({
                 background: isDraggingOver ? "color-mix(in srgb, #0a84ff 8%, transparent)" : "transparent",
               }}
             >
-              <div style={{ fontSize: 48, opacity: isDraggingOver ? 1 : 0.55 }}>📦</div>
+              <div style={{ display: "flex", opacity: isDraggingOver ? 1 : 0.55 }}><Icon icon={Package} size={48} strokeWidth={1.5} /></div>
               <div style={{ fontSize: 17, fontWeight: 650 }}>Import a .3mf or .stl</div>
               <div style={{ fontSize: 12, opacity: 0.6, maxWidth: 640, textAlign: "center" }}>{VIEWPORT_HINT}</div>
               <button type="button" onClick={() => fileInputRef.current?.click()} style={prominentButton}>

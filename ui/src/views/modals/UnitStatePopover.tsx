@@ -4,6 +4,8 @@ import { getProcessSteps, stepLabel } from "../../settingsStore";
 import { invoke } from "../../tauriInvoke";
 import { notifyError, pickFailureReason } from "../../uiFeedback";
 import { FilamentSwatch, PartUnit, Printer, ShopSnapshot, TransitionRequest } from "../../types";
+import { Palette, X } from "lucide-react";
+import { Icon } from "../../icons";
 
 export const UnitStatePopover: React.FC<{
   activeUnitMenu: { unit: PartUnit; x: number; y: number } | null;
@@ -86,7 +88,7 @@ export const UnitStatePopover: React.FC<{
             style={{ height: 20, padding: "0 6px", fontSize: 10 }}
             onClick={() => setShowColorPicker((v) => !v)}
           >
-            🎨 Color
+            <Icon icon={Palette} size={12} /> Color
           </button>
         )}
       </div>
@@ -194,7 +196,7 @@ export const UnitStatePopover: React.FC<{
                 });
               }}
             >
-              ✕ Mark Failed (Queue Reprint)
+              <Icon icon={X} /> Mark Failed (Queue Reprint)
             </button>
           </div>
         </>

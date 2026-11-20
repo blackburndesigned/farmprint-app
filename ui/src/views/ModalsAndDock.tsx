@@ -1,5 +1,7 @@
 import React from "react";
 import { DockTab } from "./shared";
+import { DOCK_TABS } from "../components/DockAndHeader";
+import { Icon } from "../icons";
 
 export { SettingsModal } from "./SettingsModal";
 
@@ -8,18 +10,8 @@ export const BottomDockBar: React.FC<{
   onSelectTab: (tab: DockTab) => void;
   badges: Record<DockTab, number | undefined>;
 }> = ({ activeTab, onSelectTab, badges }) => {
-  const items: Array<{ id: DockTab; icon: string; label: string }> = [
-    { id: "orders", icon: "📋", label: "All Orders" },
-    { id: "andon", icon: "🚥", label: "ANDON" },
-    { id: "printers", icon: "🖨️", label: "Printers" },
-    { id: "parts", icon: "🧩", label: "Parts to Print" },
-    { id: "overstock", icon: "📦", label: "Overstock" },
-    { id: "flow", icon: "⚡", label: "Flow" },
-    { id: "products", icon: "🎨", label: "Products" },
-    { id: "ready", icon: "🚚", label: "Ready to Ship" },
-    { id: "history", icon: "🕓", label: "History" },
-    { id: "value", icon: "💰", label: "Production Value" },
-  ];
+  // Same destinations and Lucide icons as the main dock (DockAndHeader DOCK_TABS), minus People.
+  const items = DOCK_TABS.filter((t) => t.id !== "people");
 
   return (
     <nav className="fp-dock-wrap">
@@ -32,7 +24,7 @@ export const BottomDockBar: React.FC<{
               className={`fp-dock-btn ${activeTab === item.id ? "active" : ""}`}
               onClick={() => onSelectTab(item.id)}
             >
-              <span>{item.icon}</span>
+              <Icon icon={item.icon} size={18} />
               <span>{item.label}</span>
               {badge !== undefined && badge > 0 && (
                 <span className="fp-dock-badge">{badge}</span>

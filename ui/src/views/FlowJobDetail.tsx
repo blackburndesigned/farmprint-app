@@ -4,6 +4,8 @@ import { PartThumbnail3D } from "../components/PartThumbnail3D";
 import { statusStepFor } from "./orders/orderStatus";
 import { stepLabel } from "../settingsStore";
 import { failureText, jobHistory, jobIdForUnit } from "./flowJob";
+import { Printer, X } from "lucide-react";
+import { Icon } from "../icons";
 
 function when(iso: string): string {
   const t = Date.parse(iso);
@@ -88,7 +90,8 @@ export const FlowJobDetail: React.FC<{
           <div style={{ minWidth: 0 }}>
             <div className="fp-modal-title">{title}</div>
             <div style={{ fontSize: 12, color: muted, marginTop: 2 }}>
-              {[printers.length ? `🖨 ${printers.join(", ")}` : "No printer", sentAt ? `Started ${when(sentAt)}` : "", jobId ? `#${jobId.slice(0, 8)}` : "Not sent to a printer yet"]
+              {printers.length > 0 && <><Icon icon={Printer} size={12} /> {printers.join(", ")} · </>}
+              {[printers.length ? "" : "No printer", sentAt ? `Started ${when(sentAt)}` : "", jobId ? `#${jobId.slice(0, 8)}` : "Not sent to a printer yet"]
                 .filter(Boolean)
                 .join(" · ")}
             </div>
@@ -102,7 +105,7 @@ export const FlowJobDetail: React.FC<{
             <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "8px 10px", borderRadius: 10, background: "rgba(255,69,58,0.12)", border: "1px solid rgba(255,69,58,0.4)" }}>
               {failures.map((f) => (
                 <div key={f.id} style={{ fontSize: 12.5, fontWeight: 700, color: "#ff6961" }}>
-                  ✕ {f.part_name}: Failed · {failureText(f) || "no reason given"}
+                  <Icon icon={X} size={13} /> {f.part_name}: Failed · {failureText(f) || "no reason given"}
                   <span style={{ fontWeight: 500, color: muted }}> — {when(f.created_at)}</span>
                 </div>
               ))}
@@ -199,7 +202,7 @@ export const FlowJobDetail: React.FC<{
                           {e.undone && <span style={{ color: muted, fontWeight: 500 }}>(undone)</span>}
                         </div>
                         <div style={{ fontSize: 10.5, color: muted, marginTop: 1 }}>
-                          {[e.action_label, e.printer_name ? `🖨 ${e.printer_name}` : "", `${e.actor_device}${e.source_surface ? ` · ${e.source_surface}` : ""}`, e.order_code ? `${e.customer_name || ""} (${e.order_code})` : ""]
+                          {[e.action_label, e.printer_name ? `Printer: ${e.printer_name}` : "", `${e.actor_device}${e.source_surface ? ` · ${e.source_surface}` : ""}`, e.order_code ? `${e.customer_name || ""} (${e.order_code})` : ""]
                             .filter(Boolean)
                             .join(" · ")}
                         </div>

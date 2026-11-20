@@ -4,6 +4,8 @@ import { ThumbnailViewportHandle, ManipulateTarget } from "../StudioViewport3D";
 import { CameraState, FramingPreset } from "../../viewportCamera";
 import { type InscriptionStudioConfig } from "./importTypes";
 import { Field, FormSection, chipButton, fieldStyle, plainButton } from "./importFormUi";
+import { Trash2 } from "lucide-react";
+import { Icon } from "../../icons";
 
 /** Step 3 (Views): saved camera views, inscription placement and studio lights. */
 export const ViewsStep: React.FC<{
@@ -73,7 +75,7 @@ export const ViewsStep: React.FC<{
             }}
             style={plainButton}
           >
-            🗑
+            <Icon icon={Trash2} size={14} />
           </button>
         </div>
       ))}

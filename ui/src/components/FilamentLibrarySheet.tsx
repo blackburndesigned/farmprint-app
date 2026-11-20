@@ -3,6 +3,8 @@ import { invoke } from "../tauriInvoke";
 import { joinHexAlpha, splitHexAlpha, swatchBackground } from "../platform";
 import { FilamentSwatch, ShopSnapshot } from "../types";
 import { confirmDeleteFilament, notifyError } from "../uiFeedback";
+import { X } from "lucide-react";
+import { Icon } from "../icons";
 
 function normalizeBrandName(brand?: string | null): string {
   const raw = (brand || "").trim();
@@ -372,7 +374,7 @@ export const FilamentLibrarySheet: React.FC<{
                     onClick={() => handleDeleteSwatch(sw.id)}
                     title="Delete spool"
                   >
-                    ✕
+                    <Icon icon={X} size={14} />
                   </button>
                 </div>
               ))}

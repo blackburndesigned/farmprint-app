@@ -7,6 +7,8 @@ import { notifyError } from "../../uiFeedback";
 import { Order, OrderLine, PartUnit } from "../../types";
 import { LineCompositeThumb } from "../shared";
 import { OrderLinePicture } from "../../orderLineThumbs";
+import { Printer } from "lucide-react";
+import { Icon } from "../../icons";
 
 /**
  * Kitting card picture for one order line: the full product as ordered, in the line's colors.
@@ -329,7 +331,8 @@ export const KittingCardModal: React.FC<{
                 }
               }}
             >
-              {printing ? "Preparing…" : "🖨️ Print Kitting Card"}
+              {!printing && <Icon icon={Printer} />}
+              {printing ? "Preparing…" : "Print Kitting Card"}
             </button>
             <button type="button" className="fp-btn fp-btn-sm" onClick={onClose}>
               Done

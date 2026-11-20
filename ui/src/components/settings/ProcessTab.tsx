@@ -3,6 +3,8 @@ import { FIXED_STEP_REASONS } from "../../settingsStore";
 import { ProcessStepSetting, ShopSettings } from "../../types";
 import { PROCESS_STEPS } from "../../views/OrdersAndonViews";
 import { ColorInput, Section, type Setter, caption, inputStyle } from "./settingsUi";
+import { ArrowDown, ArrowUp, Lock, X } from "lucide-react";
+import { Icon } from "../../icons";
 
 // --- Process --------------------------------------------------------------------
 
@@ -62,7 +64,7 @@ export const ProcessTab: React.FC<{ settings: ShopSettings; patch: Setter }> = (
                   aria-label="Fixed step"
                   style={{ ...caption, cursor: "help", flex: "none" }}
                 >
-                  🔒
+                  <Icon icon={Lock} size={13} />
                 </span>
               )}
               {isEnd ? (
@@ -70,7 +72,7 @@ export const ProcessTab: React.FC<{ settings: ShopSettings; patch: Setter }> = (
               ) : (
                 <>
                   <button type="button" className="fp-btn fp-btn-sm" disabled={i === 0} onClick={() => move(i, -1)}>
-                    ↑
+                    <Icon icon={ArrowUp} size={14} />
                   </button>
                   <button
                     type="button"
@@ -78,7 +80,7 @@ export const ProcessTab: React.FC<{ settings: ShopSettings; patch: Setter }> = (
                     disabled={steps[i + 1]?.id === lastId}
                     onClick={() => move(i, 1)}
                   >
-                    ↓
+                    <Icon icon={ArrowDown} size={14} />
                   </button>
                   <span style={{ width: 56, display: "inline-flex", justifyContent: "center", flex: "none" }}>
                   {fixedReason ? (
@@ -101,7 +103,7 @@ export const ProcessTab: React.FC<{ settings: ShopSettings; patch: Setter }> = (
                       title={builtIn.has(step.id) ? "Built-in steps can't be removed" : "Remove step"}
                       onClick={() => set(steps.filter((_, k) => k !== i))}
                     >
-                      ✕
+                      <Icon icon={X} size={14} />
                     </button>
                   )}
                   </span>
