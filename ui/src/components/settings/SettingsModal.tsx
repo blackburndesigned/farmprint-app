@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { normalizeSettings, setShopSettings } from "../../settingsStore";
+import { applyTheme, getShopSettings, normalizeSettings, setShopSettings } from "../../settingsStore";
 import { invoke } from "../../tauriInvoke";
 import { DockTab } from "../DockAndHeader";
 import { askConfirm } from "../../uiFeedback";
@@ -64,6 +64,12 @@ export const SettingsModal: React.FC<{
         setLoadState("error");
       });
   }, [open]);
+
+  // Light / Dark previews while Settings is open; closing without saving puts the saved mode back.
+  const previewMode = settings.appearance_mode;
+  useEffect(() => {
+    applyTheme(open && loadState === "ok" ? { appearance_mode: previewMode } : getShopSettings());
+  }, [open, loadState, previewMode]);
 
   if (!open) return null;
 

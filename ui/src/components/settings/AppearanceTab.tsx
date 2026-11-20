@@ -1,17 +1,16 @@
-import React, { useState } from "react";
+import React from "react";
 import { AppearanceStudio, OutlineStroke, ShopSettings } from "../../types";
-import { Check, ColorInput, Row, Section, Segmented, type Setter, caption, chooseLogoPath, inputStyle } from "./settingsUi";
+import { Check, ColorInput, Row, Section, Segmented, type Setter, chooseLogoPath, inputStyle } from "./settingsUi";
 import { notifyBanner } from "../../uiFeedback";
 import { errorText } from "../../errorText";
+import { resolveTheme, savedThemeChoice, systemPrefersDark, type ThemeMode } from "../../theme";
 import { DEFAULT_OUTLINE_STROKE, MAX_OUTLINE_STROKES } from "../../thumbnailOutline";
 
 // --- Appearance -----------------------------------------------------------------
 
-type Surface = "window" | "card" | "tile";
-const SURFACES: Array<[Surface, string]> = [
-  ["window", "Window"],
-  ["card", "Cards"],
-  ["tile", "Tiles"],
+const THEME_OPTIONS: Array<[ThemeMode, string]> = [
+  ["light", "Light"],
+  ["dark", "Dark"],
 ];
 const AXES: Array<[string, string]> = [
   ["horizontal", "Horizontal"],
@@ -37,17 +36,6 @@ function parseBg(v: string): ParsedBg {
   return base;
 }
 const gradientToken = (p: ParsedBg) => `gradient:${p.axis}:${Math.round(p.angle)}:${p.a},${p.b}`;
-function bgCss(v: string): string {
-  const p = parseBg(v);
-  if (p.kind === "solid") return p.hex;
-  if (p.kind === "gradient") {
-    if (p.axis === "radial") return `radial-gradient(${p.a}, ${p.b})`;
-    const deg = { horizontal: 90, vertical: 180, diagonal: 135, angled: p.angle }[p.axis] ?? 90;
-    return `linear-gradient(${deg}deg, ${p.a}, ${p.b})`;
-  }
-  return "repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0/10px 10px";
-}
-
 const BgEditor: React.FC<{ value: string; onChange: (v: string) => void; allowGradient: boolean }> = ({
   value,
   onChange,
@@ -108,11 +96,11 @@ const BgEditor: React.FC<{ value: string; onChange: (v: string) => void; allowGr
 };
 
 export const AppearanceTab: React.FC<{ settings: ShopSettings; patch: Setter }> = ({ settings, patch }) => {
-  const [surface, setSurface] = useState<Surface>("card");
   const st = settings.appearance_studio;
+  const systemDark = systemPrefersDark();
+  const choice = savedThemeChoice(settings.appearance_mode);
+  const shown = resolveTheme(settings.appearance_mode, systemDark);
   const setSt = (p: Partial<AppearanceStudio>) => patch({ appearance_studio: { ...st, ...p } });
-  const key = (mode: "light" | "dark") => `${surface}_bg_${mode}` as keyof AppearanceStudio;
-  const blurKey = `${surface}_bg_blur` as keyof AppearanceStudio;
   const strokes = st.tile_outline_strokes;
   const setStroke = (i: number, s: Partial<OutlineStroke>) =>
     setSt({ tile_outline_strokes: strokes.map((x, k) => (k === i ? { ...x, ...s } : x)) });
@@ -128,6 +116,34 @@ export const AppearanceTab: React.FC<{ settings: ShopSettings; patch: Setter }> 
 
   return (
     <>
+      <Section
+        title="Appearance"
+        footer={
+          choice
+            ? "FarmPrint stays in this mode whatever your computer is set to."
+            : `Not chosen yet, so FarmPrint follows your computer (${systemDark ? "dark" : "light"} right now). Picking one keeps it.`
+        }
+      >
+        <div className="fp-theme-picker" role="radiogroup" aria-label="Appearance">
+          {THEME_OPTIONS.map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={shown === mode}
+              className={`fp-theme-option ${shown === mode ? "active" : ""}`}
+              onClick={() => patch({ appearance_mode: mode })}
+            >
+              <span className={`fp-theme-preview fp-theme-preview-${mode}`} aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="fp-theme-label">{label}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
       <Section
         title="Order card part tiles"
         footer="Part thumbnails on order cards scale to fill the card width at 3 or 4 columns. Card width does not change. Grids taller than 3 rows expand on hover."
@@ -163,65 +179,6 @@ export const AppearanceTab: React.FC<{ settings: ShopSettings; patch: Setter }> 
             Reset to default
           </button>
         </div>
-      </Section>
-      <Section
-        title="Appearance Studio"
-        footer="Window, cards, and tiles each have a Light-mode and Dark-mode background. The system light/dark appearance picks the column."
-      >
-        <div style={{ display: "grid", gridTemplateColumns: "72px 1fr 1fr", gap: 8, alignItems: "center", fontSize: 12 }}>
-          <span />
-          <span style={{ fontWeight: 600 }}>Light mode</span>
-          <span style={{ fontWeight: 600 }}>Dark mode</span>
-          {SURFACES.map(([s, label]) => (
-            <React.Fragment key={s}>
-              <button
-                type="button"
-                className={`fp-btn fp-btn-sm ${surface === s ? "fp-btn-primary" : ""}`}
-                onClick={() => setSurface(s)}
-              >
-                {label}
-              </button>
-              {(["light", "dark"] as const).map((m) => (
-                <div
-                  key={m}
-                  onClick={() => setSurface(s)}
-                  style={{
-                    height: 26,
-                    borderRadius: 6,
-                    background: bgCss(String(st[`${s}_bg_${m}` as keyof AppearanceStudio] ?? "")),
-                    border: surface === s ? "2px solid #0a84ff" : "1px solid rgba(255,255,255,0.15)",
-                    cursor: "pointer",
-                  }}
-                />
-              ))}
-            </React.Fragment>
-          ))}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {(["light", "dark"] as const).map((m) => (
-            <div key={m} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 600 }}>
-                {SURFACES.find(([s]) => s === surface)?.[1]} — {m === "light" ? "Light" : "Dark"}
-              </div>
-              <BgEditor
-                value={String(st[key(m)] ?? "")}
-                allowGradient={surface !== "window"}
-                onChange={(v) => setSt({ [key(m)]: v } as Partial<AppearanceStudio>)}
-              />
-            </div>
-          ))}
-        </div>
-        <Row label="Blur">
-          <input
-            type="range"
-            min={0}
-            max={40}
-            value={Number(st[blurKey]) || 0}
-            onChange={(e) => setSt({ [blurKey]: parseFloat(e.target.value) } as Partial<AppearanceStudio>)}
-          />
-          <span style={{ width: 32 }}>{Math.round(Number(st[blurKey]) || 0)}</span>
-        </Row>
-        <div style={caption}>Softens the color or gradient on this surface. Off when Reduce Transparency is on.</div>
       </Section>
       <Section
         title="Thumbnail outline"
@@ -309,36 +266,6 @@ export const AppearanceTab: React.FC<{ settings: ShopSettings; patch: Setter }> 
               </button>
             </div>
           </>
-        )}
-      </Section>
-      <Section
-        title="Order card header frost"
-        footer="Uses the system frost. Reduce Transparency or Increase Contrast turns the strip solid; tint still applies."
-      >
-        <Check
-          label="Frost the name strip"
-          checked={st.card_header_frost_enabled}
-          onChange={(v) => setSt({ card_header_frost_enabled: v })}
-        />
-        {st.card_header_frost_enabled && (
-          <Row label="Tint">
-            <Segmented
-              value={st.card_header_frost_tint || "none"}
-              options={[
-                ["none", "None"],
-                ["light", "Light"],
-                ["dark", "Dark"],
-                ["custom", "Custom"],
-              ]}
-              onChange={(v) => setSt({ card_header_frost_tint: v })}
-            />
-            {st.card_header_frost_tint === "custom" && (
-              <ColorInput
-                value={st.card_header_frost_custom_hex}
-                onChange={(hex) => setSt({ card_header_frost_custom_hex: hex })}
-              />
-            )}
-          </Row>
         )}
       </Section>
     </>

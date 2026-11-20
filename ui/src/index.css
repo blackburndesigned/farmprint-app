@@ -295,28 +295,8 @@ body.fp-wall-mode .fp-main .fp-scroll > div[style*="min-width: 260px"] {
   color: #0a84ff;
 }
 
-/* --- Settings › Appearance Studio (variables set by settingsStore.applyAppearance) --- */
+/* --- Light / Dark lives in theme.css (data-theme on <html>, set by settingsStore.applyTheme) --- */
 .fp-shell { position: relative; isolation: isolate; }
-body.fp-has-window-bg .fp-shell { background: transparent; }
-body.fp-has-window-bg .fp-shell::before {
-  content: ""; position: absolute; inset: calc(-1 * var(--fp-window-blur, 0px)); z-index: -1; pointer-events: none;
-  background: var(--fp-window-bg); filter: blur(var(--fp-window-blur, 0px));
-}
-body.fp-has-card-bg { --fp-card-backdrop: blur(var(--fp-card-blur, 0px)); }
-body.fp-has-card-bg .fp-card, body.fp-has-card-bg .fp-printer-card, body.fp-has-card-bg .fp-order-card {
-  background: var(--fp-card-bg); backdrop-filter: blur(var(--fp-card-blur, 0px));
-}
-body.fp-has-tile-bg .fp-part-tile { backdrop-filter: blur(var(--fp-tile-blur, 0px)); }
-body.fp-header-frost .fp-order-card-header {
-  background: var(--fp-header-frost-tint, transparent) !important;
-  backdrop-filter: blur(18px) saturate(1.5); -webkit-backdrop-filter: blur(18px) saturate(1.5);
-}
-@media (prefers-reduced-transparency: reduce) {
-  body.fp-header-frost .fp-order-card-header { backdrop-filter: none; -webkit-backdrop-filter: none; }
-  body.fp-has-card-bg .fp-card, body.fp-has-card-bg .fp-printer-card, body.fp-has-card-bg .fp-order-card,
-  body.fp-has-tile-bg .fp-part-tile { backdrop-filter: none; }
-  body.fp-has-window-bg .fp-shell::before { filter: none; }
-}
 
 /* --- Brand logo & sidebar navigation --- */
 .fp-brand-logo { height: 28px; max-width: 140px; object-fit: contain; display: block; }
@@ -339,7 +319,6 @@ body.fp-header-frost .fp-order-card-header {
 .fp-sidebar-spacer { flex: 1; }
 body.fp-wall-mode .fp-sidebar { display: none; }
 .fp-nav-sidebar .fp-scroll { padding-bottom: 24px; }
-body.fp-has-tile-bg { --fp-tile-backdrop: blur(var(--fp-tile-blur, 0px)); }
 .fp-dock .fp-brand-logo { align-self: center; margin: 0 8px 0 4px; }
 
 /* Kitting cards. The native print (WKWebView on macOS) lays the whole document out again at
