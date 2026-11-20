@@ -1,4 +1,4 @@
-//! Help menu items that open the public farmprint-releases issue forms.
+//! Help menu items that open the public farmprint-app issue forms.
 
 pub use crate::feedback_url::{
     issue_kind_from_menu_id, issue_url, open_in_browser, os_label, IssueKind, REPORT_BUG_ID,
