@@ -118,8 +118,14 @@ async function renderOutlined(src: string, strokes: ResolvedStroke[], displaySiz
   const dx = (side - dw) / 2;
   const dy = (side - dh) / 2;
 
+  const { c: pic, g: pg } = makeCanvas(side, side);
+  pg.drawImage(img, dx, dy, dw, dh);
+  // A solid copy of the shape: faint (ghosted) or soft-edged pixels still count as the
+  // product, so the outline hugs the whole silhouette and never bleeds into it.
   const { c: sil, g: sg } = makeCanvas(side, side);
-  sg.drawImage(img, dx, dy, dw, dh);
+  const px = pg.getImageData(0, 0, side, side);
+  for (let i = 3; i < px.data.length; i += 4) px.data[i] = px.data[i] > 8 ? 255 : 0;
+  sg.putImageData(px, 0, 0);
 
   const { c: out, g: og } = makeCanvas(side, side);
   let inner = sil;
@@ -139,7 +145,7 @@ async function renderOutlined(src: string, strokes: ResolvedStroke[], displaySiz
     inner = grown;
   }
   og.globalAlpha = 1;
-  og.drawImage(sil, 0, 0);
+  og.drawImage(pic, 0, 0);
   return out.toDataURL("image/png");
 }
 

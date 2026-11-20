@@ -56,7 +56,7 @@ const KittingLinePicture: React.FC<{ order: Order; line: OrderLine; size: number
       style={{ display: "inline-flex", flexShrink: 0, width: size, height: size, alignItems: "center", justifyContent: "center" }}
     >
       <span ref={sourceRef} style={{ display: trimmed ? "none" : "inline-flex" }}>
-        <OrderLinePicture order={order} line={line} size={size} fallback={<LineCompositeThumb line={line} size={size} renderPx={640} />} />
+        <OrderLinePicture order={order} line={line} size={size} noOutline fallback={<LineCompositeThumb line={line} size={size} renderPx={640} noOutline />} />
       </span>
       {trimmed && (
         <img

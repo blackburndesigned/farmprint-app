@@ -204,6 +204,8 @@ export const ShopOrderCard: React.FC<{
                   size={compositeSide}
                   inscriptionText={primaryLine?.custom_text}
                   liveTint
+                  ghostHidden={ghostNonVisible}
+                  statusHex={stepInfo.bg}
                 />
               );
               // Ghosted cards (some parts hidden) keep the composite so hidden parts stay dimmed.

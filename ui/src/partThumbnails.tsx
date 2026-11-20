@@ -782,7 +782,12 @@ function loadColorwayRaw(folderId: string) {
 }
 
 
-function recolorColorway(pack: ColorwayPack, colorByIndex: Map<number, string>): HTMLCanvasElement {
+/** Parts not at the card's stage: neutral grey at this opacity, so the product keeps its shape. */
+const GHOST_HEX = "#8E8E93";
+const GHOST_ALPHA = 0.2;
+
+/** `ghost`: draw hidden parts ("" color) as faint grey instead of leaving them out. */
+function recolorColorway(pack: ColorwayPack, colorByIndex: Map<number, string>, ghost = false): HTMLCanvasElement {
   const n = pack.size;
   const c = document.createElement("canvas");
   c.width = n;
@@ -800,7 +805,9 @@ function recolorColorway(pack: ColorwayPack, colorByIndex: Map<number, string>):
     const a = pack.shading[i * 4 + 3];
     if (!a) continue;
     const idx = pack.mask[i];
-    const col = rgb.has(idx) ? rgb.get(idx) : neutral;
+    let col = rgb.has(idx) ? rgb.get(idx) : neutral;
+    const ghosted = !col && ghost;
+    if (ghosted) col = neutral;
     if (!col) continue; // hidden part
     // color = shading.rgb * albedo (Swift ThumbnailAssets contract).
     out.data[i * 4] = (pack.shading[i * 4] * col[0]) / 255;
@@ -808,7 +815,9 @@ function recolorColorway(pack: ColorwayPack, colorByIndex: Map<number, string>):
     out.data[i * 4 + 2] = (pack.shading[i * 4 + 2] * col[2]) / 255;
     const fa = alphaOf.get(idx) ?? 1;
     const lum = (pack.shading[i * 4] * 0.299 + pack.shading[i * 4 + 1] * 0.587 + pack.shading[i * 4 + 2] * 0.114) / 255;
-    out.data[i * 4 + 3] = fa < 0.999 ? Math.round(a * translucentCoverage(fa, lum)) : a;
+    out.data[i * 4 + 3] = ghosted
+      ? Math.round(a * GHOST_ALPHA)
+      : fa < 0.999 ? Math.round(a * translucentCoverage(fa, lum)) : a;
   }
   g.putImageData(out, 0, 0);
   return c;
@@ -914,14 +923,21 @@ export const ProductCompositeThumb: React.FC<{
   liveTint?: boolean;
   /** Pixel size the composite is drawn at (default 240). Pass more (e.g. 640) for print. */
   renderPx?: number;
-}> = ({ productIdOrName, parts, size = 76, inscriptionText, liveTint = false, renderPx = 240 }) => {
+  /** Draw hidden parts (`visible: false`) as a faint grey ghost, so the whole product keeps
+   *  its shape, size and position and only the shown parts are in color (ANDON stages). */
+  ghostHidden?: boolean;
+  /** Process color, used when the Settings outline follows part status. */
+  statusHex?: string;
+  /** Skip the Settings outline (printed paper keeps its own look). */
+  noOutline?: boolean;
+}> = ({ productIdOrName, parts, size = 76, inscriptionText, liveTint = false, renderPx = 240, ghostHidden = false, statusHex, noOutline }) => {
   const R = Math.max(16, Math.min(2048, Math.round(renderPx) || 240));
   // Tinted layers are capped at 256 px; a bigger composite needs bigger layers.
   const tintMax = Math.max(256, R);
   const compositeKey =
     `${productIdOrName}::${parts
       .map((p) => `${p.partId || ""}:${p.partName}:${p.colorHex}:${p.visible !== false ? 1 : 0}`)
-      .join("|")}::${inscriptionText || ""}::${liveTint ? "live" : "hero"}::v8` + (R === 240 ? "" : `::${R}px`);
+      .join("|")}::${inscriptionText || ""}::${liveTint ? "live" : "hero"}${ghostHidden ? "::ghost" : ""}::v8` + (R === 240 ? "" : `::${R}px`);
 
   const [src, setSrc] = useState<string>(() => COMPOSITE_CACHE.get(compositeKey) || "");
 
@@ -952,6 +968,32 @@ export const ProductCompositeThumb: React.FC<{
           if (!frame) frame = { w, h };
           const at = frameRect(frame, w, h, R, R);
           ctx.drawImage(src, at.x, at.y, at.w, at.h);
+        };
+        // Every layer, hidden or not, fixes the frame from the first one, so the product's
+        // size and position never change with which parts are shown. Ghosts go underneath,
+        // then the shown parts in full color on top.
+        const drawLayers = async (
+          steps: Array<{ file: string; color: string }>,
+          canv: Array<HTMLCanvasElement | null>
+        ) => {
+          const first = canv.find((lc) => lc && lc.width > 0);
+          if (first && !frame) frame = { w: first.width, h: first.height };
+          if (ghostHidden) {
+            const ghosts = await Promise.all(
+              steps.map((l) =>
+                l.color ? null : getTintedPartCanvas(l.file, GHOST_HEX, true, undefined, tintMax).catch(() => null)
+              )
+            );
+            ctx.save();
+            ctx.globalAlpha = GHOST_ALPHA;
+            ghosts.forEach((gc) => {
+              if (gc && gc.width > 0) drawFitted(gc, gc.width, gc.height);
+            });
+            ctx.restore();
+          }
+          canv.forEach((lc, i) => {
+            if (lc && lc.width > 0 && steps[i].color) drawFitted(lc, lc.width, lc.height);
+          });
         };
 
         if (!liveTint && productIdOrName && !productIdOrName.includes(" ")) {
@@ -1015,7 +1057,7 @@ export const ProductCompositeThumb: React.FC<{
                 def?.parts.find((pt) => pt.names.some((n) => partStem(n) === partStem(e.name)));
               slotColor.set(e.index, colorForSlot(part, e.name));
             }
-            ctx.drawImage(recolorColorway(pack, slotColor), 0, 0, R, R);
+            ctx.drawImage(recolorColorway(pack, slotColor, ghostHidden), 0, 0, R, R);
             return true;
           };
           const tryLayers = async (ref: Uint8ClampedArray | null, selfCheck = false) => {
@@ -1047,9 +1089,7 @@ export const ProductCompositeThumb: React.FC<{
               steps.map((l) => getTintedPartCanvas(l.file, l.color || "#8E8E93", true, undefined, tintMax).catch(() => null))
             );
             if (ref && layerUnionIoU(canv, ref) < 0.8) return false;
-            canv.forEach((lc, i) => {
-              if (lc && lc.width > 0 && steps[i].color) drawFitted(lc, lc.width, lc.height);
-            });
+            await drawLayers(steps, canv);
             return true;
           };
           // One tintable part and no layers/pack: the picture is that part, so tint its shape.
@@ -1089,9 +1129,7 @@ export const ProductCompositeThumb: React.FC<{
           if (plan && plan.length) {
             const steps = plan.map((step) => ({ file: step.file, color: colorForSlot(step.part, step.layerName) }));
             const canv = await Promise.all(steps.map((l) => getTintedPartCanvas(l.file, l.color || "#8E8E93", true, undefined, tintMax).catch(() => null)));
-            canv.forEach((lc, i) => {
-              if (lc && lc.width > 0 && steps[i].color) drawFitted(lc, lc.width, lc.height);
-            });
+            await drawLayers(steps, canv);
             drew = true;
           }
         }
@@ -1137,6 +1175,8 @@ export const ProductCompositeThumb: React.FC<{
     };
   }, [compositeKey]);
 
+  const shownSrc = useOutlinedSrc(src, size, statusHex, noOutline || !src);
+
   if (!src) {
     return (
       <div
@@ -1157,7 +1197,7 @@ export const ProductCompositeThumb: React.FC<{
 
   return (
     <img
-      src={src}
+      src={shownSrc}
       onError={swapToPlaceholder}
       alt={productIdOrName}
       width={size}
