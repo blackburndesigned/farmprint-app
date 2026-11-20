@@ -20,20 +20,6 @@ const STATUS_CHIP: Record<string, { label: string; bg: string; fg: string }> = {
   Idle: { label: "Idle", bg: "rgba(142, 142, 147, 0.18)", fg: "#8e8e93" },
 };
 
-/** Line drawing of an FDM printer (frame, gantry, nozzle, bed), tinted with the printer's accent. */
-const PrinterGlyph: React.FC<{ accent: string; size?: number }> = ({ accent, size = 64 }) => (
-  <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden="true">
-    <rect x="8" y="6" width="48" height="50" rx="6" stroke={accent} strokeWidth="3" />
-    <path d="M8 18h48" stroke={accent} strokeWidth="2.5" opacity="0.55" />
-    <rect x="25" y="15" width="14" height="8" rx="2" fill={accent} />
-    <path d="M32 23v6" stroke={accent} strokeWidth="2.5" strokeLinecap="round" />
-    <path d="M29.5 29h5l-2.5 3z" fill={accent} />
-    <rect x="15" y="42" width="34" height="5" rx="2" fill={accent} opacity="0.85" />
-    <rect x="25" y="35" width="14" height="7" rx="1.5" fill={accent} opacity="0.4" />
-    <path d="M14 56v3M50 56v3" stroke={accent} strokeWidth="3" strokeLinecap="round" />
-  </svg>
-);
-
 const Swatch: React.FC<{ slot: PrinterSlot; size?: number }> = ({ slot, size = 18 }) => (
   <span
     title={`${slot.filament_name}${slot.material ? ` · ${slot.material}` : ""}`}
@@ -70,7 +56,6 @@ const PrinterCard: React.FC<{ printer: Printer; accent: string; onOpen: () => vo
   return (
     <button type="button" className="fp-printer-tile" onClick={onOpen} aria-label={`Edit ${p.name}`}>
       <div className="fp-printer-tile-art" style={{ background: `linear-gradient(160deg, ${accent}2e, ${accent}0a)` }}>
-        <PrinterGlyph accent={accent} />
         <span className="fp-printer-tile-chip" style={{ background: chip.bg, color: chip.fg }}>
           <span style={{ width: 6, height: 6, borderRadius: 999, background: chip.fg }} />
           {chip.label}
@@ -135,7 +120,6 @@ const PrinterEditSheet: React.FC<{
         onClick={(e) => e.stopPropagation()}
       >
         <div className="fp-printer-sheet-head" style={{ background: `linear-gradient(160deg, ${accent}33, ${accent}08)` }}>
-          <PrinterGlyph accent={accent} size={56} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
             <div className="fp-printer-tile-sub">{[p.model || "No model", p.nozzle_mm ? `${p.nozzle_mm} mm nozzle` : ""].filter(Boolean).join(" · ")}</div>
@@ -312,7 +296,6 @@ export const PrintersTab: React.FC<{
           ))}
           {adding ? (
             <div className="fp-printer-tile fp-printer-tile-add" style={{ cursor: "default", padding: 14, gap: 8, justifyContent: "center" }}>
-              <PrinterGlyph accent={DEFAULT_ACCENT} size={40} />
               <input
                 type="text"
                 autoFocus

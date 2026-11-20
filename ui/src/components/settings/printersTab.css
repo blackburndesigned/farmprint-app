@@ -3,12 +3,12 @@
 .fp-printer-tile {
   display: flex; flex-direction: column; align-items: stretch; text-align: left; padding: 0; overflow: hidden;
   border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--bg-card); color: var(--text-primary);
-  font: inherit; cursor: pointer; min-height: 196px;
+  font: inherit; cursor: pointer; min-height: 140px;
   transition: transform 0.22s var(--ease-quick), border-color 0.18s var(--ease-quick), box-shadow 0.22s var(--ease-quick);
 }
 .fp-printer-tile:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22); }
 .fp-printer-tile:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
-.fp-printer-tile-art { position: relative; height: 92px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-subtle); }
+.fp-printer-tile-art { position: relative; height: 40px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--border-subtle); }
 .fp-printer-tile-chip {
   position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 5px;
   padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
