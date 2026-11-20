@@ -19,6 +19,7 @@ import type { OrderThumbnailCapture, ViewCamera } from "./components/OrderViewpo
 import { cameraFromJson } from "./components/orderModelCache";
 import { OrderRePoseModal, renderOrderThumbnail } from "./lazy3D";
 import { useOutlinedSrc } from "./thumbnailOutline";
+import { fitBox } from "./partThumbnails";
 
 export type OrderThumbSource = "new_order" | "re_pose" | "website" | "recolor";
 
@@ -248,7 +249,9 @@ export const OrderLinePicture: React.FC<{
   framed?: boolean;
   /** Skip the Settings outline (printed paper). */
   noOutline?: boolean;
-}> = ({ order, line, product, filaments, size, fallback, framed, noOutline }) => {
+  /** Shrink with the parent's width, `size` px at most (unframed only). */
+  fluid?: boolean;
+}> = ({ order, line, product, filaments, size, fallback, framed, noOutline, fluid = false }) => {
   const saved = useOrderLineThumb(order.id, line.id);
   const stale = !!saved && thumbColorsStale(saved, line);
   const shown = useOutlinedSrc(saved && !stale ? saved.pngDataUrl : "", framed ? Math.round(size * 0.9) : size, undefined, noOutline);
@@ -264,7 +267,7 @@ export const OrderLinePicture: React.FC<{
       src={shown}
       alt={line.product_name}
       draggable={false}
-      style={{ width: framed ? Math.round(size * 0.9) : size, height: framed ? Math.round(size * 0.9) : size, objectFit: "contain", display: "block" }}
+      style={{ ...fitBox(framed ? Math.round(size * 0.9) : size, fluid && !framed), objectFit: "contain", display: "block" }}
     />
   );
   if (!framed) return img;

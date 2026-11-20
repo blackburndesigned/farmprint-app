@@ -206,11 +206,12 @@ export const ShopOrderCard: React.FC<{
                   liveTint
                   ghostHidden={ghostNonVisible}
                   statusHex={stepInfo.bg}
+                  fluid
                 />
               );
               // Ghosted cards (some parts hidden) keep the composite so hidden parts stay dimmed.
               return primaryLine && !ghostNonVisible ? (
-                <OrderLinePicture order={order} line={primaryLine} size={compositeSide} fallback={composite} />
+                <OrderLinePicture order={order} line={primaryLine} size={compositeSide} fallback={composite} fluid />
               ) : composite;
             })()}
 
