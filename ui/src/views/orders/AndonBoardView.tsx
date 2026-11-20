@@ -94,22 +94,17 @@ export const AndonBoardView: React.FC<{
           </div>
           <StatusLegendHeader />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            type="button"
-            className={`fp-btn fp-btn-sm ${!wallMode ? "fp-btn-primary" : ""}`}
-            onClick={() => onToggleWallMode(false)}
-          >
-            Work Mode
-          </button>
-          <button
-            type="button"
-            className={`fp-btn fp-btn-sm ${wallMode ? "fp-btn-primary" : ""}`}
-            onClick={() => onToggleWallMode(true)}
-          >
-            Wall TV Mode
-          </button>
-        </div>
+        {/* In Wall TV the auto-hiding controls in TopHeader are the only ones shown. */}
+        {!wallMode && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => onToggleWallMode(false)}>
+              Work Mode
+            </button>
+            <button type="button" className="fp-btn fp-btn-sm" onClick={() => onToggleWallMode(true)}>
+              Wall TV Mode
+            </button>
+          </div>
+        )}
       </div>
 
       <div

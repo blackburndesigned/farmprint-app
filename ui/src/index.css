@@ -90,10 +90,13 @@ html, body, #root {
   display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;
   border-radius: 12px; background: rgba(14, 17, 24, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(18px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65); opacity: 0.45;
-  transition: opacity 0.2s var(--ease-quick), transform 0.2s var(--ease-quick);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
+  /* Hidden until the mouse moves (.is-shown, set by TopHeader, which keeps it while hovered). */
+  opacity: 0; pointer-events: none; transform: translateY(-6px);
+  transition: opacity 0.25s var(--ease-quick), transform 0.25s var(--ease-quick);
 }
-.fp-wall-hover-pill:hover { opacity: 1; transform: translateY(1px); }
+.fp-wall-hover-pill.is-shown,
+.fp-wall-hover-pill:focus-within { opacity: 1; pointer-events: auto; transform: none; }
 body.fp-wall-mode .fp-dock-wrap { display: none !important; }
 body.fp-wall-mode .fp-main .fp-scroll {
   padding-bottom: 18px !important;

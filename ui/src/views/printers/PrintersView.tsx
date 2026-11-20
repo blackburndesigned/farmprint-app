@@ -147,10 +147,13 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
         <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => setShowAddPrinterModal(true)}>
           + Add Printer
         </button>
-        <div className="fp-mode-toggle">
-          <button type="button" className={`fp-mode-btn ${!wallMode ? "active" : ""}`} onClick={() => setWallMode(false)}>Work</button>
-          <button type="button" className={`fp-mode-btn ${wallMode ? "active" : ""}`} onClick={() => setWallMode(true)}>Wall TV</button>
-        </div>
+        {/* In Wall TV the auto-hiding controls in TopHeader are the only ones shown. */}
+        {!wallMode && (
+          <div className="fp-mode-toggle">
+            <button type="button" className="fp-mode-btn active" onClick={() => setWallMode(false)}>Work</button>
+            <button type="button" className="fp-mode-btn" onClick={() => setWallMode(true)}>Wall TV</button>
+          </div>
+        )}
         {!wallMode && (
           <div className="fp-mode-toggle" role="group" aria-label="Group printer jobs">
             <button type="button" className={`fp-mode-btn ${boardView === "job" ? "active" : ""}`} title="Show each batch exactly as it was sent, even when it has parts from several orders" onClick={() => chooseBoardView("job")}>By job</button>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "../index.css";
 import { BrandLogo } from "./BrandLogo";
 import { shortcut } from "../platform";
@@ -86,6 +86,9 @@ export interface TopHeaderProps {
   rightSlot?: React.ReactNode;
 }
 
+/** Wall TV controls hide this long after the last mouse movement or key press. */
+const WALL_CONTROLS_IDLE_MS = 2500;
+
 /**
  * Keyboard shortcut controller + Wall TV hover bar + toast banner.
  * Per-view headers (`OrdersListView`, `AndonBoardView`, `PrinterLanesView`, `PartsToPrintView`, etc.)
@@ -125,6 +128,47 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   useEffect(() => {
     setBridgeWallMode(Boolean(isWall));
+  }, [isWall]);
+
+  // Wall TV: the one set of view controls shows on mouse movement (or a key press) and hides
+  // after WALL_CONTROLS_IDLE_MS, but never while the pointer is over it or it has keyboard
+  // focus. Esc always leaves Wall TV.
+  const [wallControlsShown, setWallControlsShown] = useState(true);
+  const wallPillRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!isWall) return;
+    let timer: number | undefined;
+    let pointer: { x: number; y: number } | null = null;
+    const wake = (e?: Event) => {
+      if (e instanceof MouseEvent) pointer = { x: e.clientX, y: e.clientY };
+      setWallControlsShown(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(hideIfIdle, WALL_CONTROLS_IDLE_MS);
+    };
+    const hideIfIdle = () => {
+      const pill = wallPillRef.current;
+      const r = pill?.getBoundingClientRect();
+      const pointerOver =
+        !!r && !!pointer && pointer.x >= r.left && pointer.x <= r.right && pointer.y >= r.top && pointer.y <= r.bottom;
+      if (pointerOver || pill?.matches(":focus-within")) {
+        timer = window.setTimeout(hideIfIdle, WALL_CONTROLS_IDLE_MS);
+        return;
+      }
+      setWallControlsShown(false);
+    };
+    // The pointer left the window: it is no longer over the controls.
+    const forgetPointer = () => {
+      pointer = null;
+    };
+    wake();
+    const events = ["mousemove", "mousedown", "touchstart", "keydown", "wheel"] as const;
+    events.forEach((ev) => window.addEventListener(ev, wake, { passive: true }));
+    document.documentElement.addEventListener("mouseleave", forgetPointer);
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, wake));
+      document.documentElement.removeEventListener("mouseleave", forgetPointer);
+    };
   }, [isWall]);
 
   useEffect(() => {
@@ -181,7 +225,12 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
   if (isWall) {
     return (
-      <div className="fp-wall-hover-pill" role="region" aria-label="Wall display controls">
+      <div
+        ref={wallPillRef}
+        className={`fp-wall-hover-pill${wallControlsShown ? " is-shown" : ""}`}
+        role="region"
+        aria-label="Wall display controls"
+      >
         <div className="fp-mode-toggle">
           <button type="button" className="fp-mode-btn" onClick={() => applyWallMode(false)}>
             Work
