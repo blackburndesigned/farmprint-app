@@ -4,6 +4,8 @@ import { FilamentSwatch, Order, OrderLine, PartUnit, Product } from "../types";
 import { CreatedCatalogProductPayload } from "../components/ProductImportModal3D";
 import { isThumbnailOnlyUnit, PartThumb, ProductCompositeThumb } from "../partThumbnails";
 import { statusStepFor } from "./OrdersAndonViews";
+import { useShopSettings } from "../settingsStore";
+import { outlineReplacesRing } from "../thumbnailOutline";
 import { SuggestedPrintGroup } from "./PrintersQueueViews";
 
 export type { DockTab, SuggestedPrintGroup };
@@ -75,6 +77,7 @@ export const PartTileCard: React.FC<{
   onSelectUnit?: (unit: PartUnit, e: React.MouseEvent<HTMLElement>) => void;
 }> = ({ unit, size = 72, onSelectUnit }) => {
   const step = statusStepFor(unit.state);
+  const hideRing = outlineReplacesRing(useShopSettings().appearance_studio);
   return (
     <button
       type="button"
@@ -87,7 +90,7 @@ export const PartTileCard: React.FC<{
         width: size,
         height: size,
         borderRadius: 10,
-        border: `2.5px solid ${step.bg}`,
+        border: hideRing ? "2.5px solid transparent" : `2.5px solid ${step.bg}`,
         background: "rgba(22, 24, 30, 0.92)",
         padding: 4,
         display: "flex",
@@ -104,6 +107,7 @@ export const PartTileCard: React.FC<{
         colorHex={unit.filament_hex}
         size={Math.round(size * 0.62)}
         productId={unit.product_id}
+        statusHex={step.bg}
       />
       <span
         style={{

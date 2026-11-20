@@ -6,6 +6,7 @@ import {
   resolvePartCatalogPngUrl,
   isKnownCatalogPartId } from "../partThumbnails";
 import { renderThumbnailGL } from "../meshRendererGL";
+import { useOutlinedSrc } from "../thumbnailOutline";
 
 export interface RenderPartThumbOptions {
   partName: string;
@@ -355,6 +356,8 @@ export interface PartThumbnail3DProps {
   productId?: string;
   /** Catalog part id; picks the right picture when parts share a name. */
   partId?: string;
+  /** Process color, used when the Settings outline follows part status. */
+  statusHex?: string;
 }
 
 export const PartThumbnail3D: React.FC<PartThumbnail3DProps> = ({
@@ -367,6 +370,7 @@ export const PartThumbnail3D: React.FC<PartThumbnail3DProps> = ({
   customThumbnailDataUrl,
   productId,
   partId,
+  statusHex,
 }) => {
   const lookupKey = partId && isKnownCatalogPartId(partId) ? partId : partName;
   const bakedFromMesh =
@@ -380,6 +384,7 @@ export const PartThumbnail3D: React.FC<PartThumbnail3DProps> = ({
       : null;
 
   const customUrl = customThumbnailDataUrl || bakedFromMesh;
+  const outlinedCustom = useOutlinedSrc(customUrl || "", size, statusHex);
 
   return (
     <div
@@ -400,7 +405,7 @@ export const PartThumbnail3D: React.FC<PartThumbnail3DProps> = ({
     >
       {customUrl ? (
         <img
-          src={customUrl}
+          src={outlinedCustom}
           onError={(e) => {
             if (e.currentTarget.src !== PART_PLACEHOLDER_SRC) e.currentTarget.src = PART_PLACEHOLDER_SRC;
           }}
@@ -423,6 +428,7 @@ export const PartThumbnail3D: React.FC<PartThumbnail3DProps> = ({
           colorHex={colorHex}
           size={size}
           productId={productId}
+          statusHex={statusHex}
         />
       )}
     </div>
