@@ -393,6 +393,30 @@ impl ShopLedger {
             .unwrap_or((None, None)))
     }
 
+    /// The filaments loaded on a printer, by slot (1-based, as Settings shows "Slot 1").
+    /// Empty when the printer has none loaded or doesn't exist. A slot whose swatch was
+    /// deleted keeps its id with an empty name, hex and material.
+    pub fn printer_loaded_slots(&self, printer_id: &str) -> CoreResult<Vec<PrinterSlot>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.slot_index, s.filament_id, COALESCE(f.name, ''), COALESCE(f.hex, ''),
+                    COALESCE(f.material, '')
+             FROM printer_slots s LEFT JOIN filaments f ON f.id = s.filament_id
+             WHERE s.printer_id = ?1 ORDER BY s.slot_index",
+        )?;
+        let slots = stmt
+            .query_map(params![printer_id], |r| {
+                Ok(PrinterSlot {
+                    slot_index: r.get(0)?,
+                    filament_id: r.get(1)?,
+                    filament_name: r.get(2)?,
+                    filament_hex: r.get(3)?,
+                    material: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(slots)
+    }
+
     /// Groups of filament rows that look like the same swatch: same brand, name and
     /// material (case/whitespace-insensitive) and same hex. The oldest row is the
     /// canonical id. Read-only.
@@ -4002,6 +4026,42 @@ mod tests {
             (Some(256.0), Some(240.0))
         );
         assert_eq!(ledger.printer_bed_mm("prn-nope").unwrap(), (None, None));
+    }
+
+    #[test]
+    fn printer_loaded_slots_reads_slot_numbers_and_swatches() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let pid = snap.printers[0].id.clone();
+        let fils: Vec<_> = snap.filaments.iter().take(2).cloned().collect();
+        assert_eq!(fils.len(), 2);
+        // Slot 2 left empty: slots keep their own numbers.
+        ledger
+            .set_printer_filament_slots(
+                &pid,
+                vec![fils[0].id.clone(), String::new(), fils[1].id.clone()],
+            )
+            .unwrap();
+        let slots = ledger.printer_loaded_slots(&pid).unwrap();
+        let got: Vec<(i64, &str, &str)> = slots
+            .iter()
+            .map(|s| {
+                (
+                    s.slot_index,
+                    s.filament_id.as_str(),
+                    s.filament_hex.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, fils[0].id.as_str(), fils[0].hex.as_str()),
+                (3, fils[1].id.as_str(), fils[1].hex.as_str())
+            ]
+        );
+        assert_eq!(slots[0].material, fils[0].material);
+        assert!(ledger.printer_loaded_slots("prn-nope").unwrap().is_empty());
     }
 
     #[test]

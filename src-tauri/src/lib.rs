@@ -17,7 +17,7 @@ use fp_core::{
     CreateCatalogPartInput, CreateOrderInput, CreateProductInput, Product, ShopLedger,
     ShopSettings, ShopSnapshot, TransitionRequest,
 };
-use fp_mesh::{load_stl_file, parse_3mf_parts, parse_stl_bytes, write_3mf_plate, PlateBuildItem};
+use fp_mesh::{load_stl_file, parse_3mf_parts, parse_stl_bytes, PlateBuildItem};
 use fp_sync::SyncStatus;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -283,6 +283,51 @@ mod print_mesh_tests {
         assert!(build_plate_bytes(&wide, None).is_ok());
     }
 
+    /// Print! hands the plate writer the chosen printer's slots: a unit whose filament is
+    /// loaded in slot 3 opens as filament 3, the others take numbers no loaded slot uses.
+    #[test]
+    fn plate_filaments_follow_the_chosen_printers_slots() {
+        let mut ledger = fp_core::ShopLedger::open_in_memory().unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let pid = snap.printers[0].id.clone();
+        let f: Vec<_> = snap.filaments.iter().take(3).cloned().collect();
+        assert_eq!(f.len(), 3);
+        // Slot 1: f[2] (not on the plate), slot 3: f[0].
+        ledger
+            .set_printer_filament_slots(&pid, vec![f[2].id.clone(), String::new(), f[0].id.clone()])
+            .unwrap();
+        let slots = ledger.printer_loaded_slots(&pid).unwrap();
+        let with = |i: usize, fil: &fp_core::FilamentSwatch| {
+            let mut u = unit("p", "part", i as i64);
+            u.filament_id = fil.id.clone();
+            u.filament_hex = fil.hex.clone();
+            u.filament_material = fil.material.clone();
+            (u, "part.stl".to_string())
+        };
+        let units = vec![with(0, &f[0]), with(1, &f[1]), with(2, &f[0])];
+        let opts =
+            super::plate_options_for(&units, plate_bed_for(Some(256.0), Some(256.0)), &slots);
+        assert_eq!(opts.bed.width_mm, 256.0);
+        assert_eq!(
+            opts.loaded_slots.iter().map(|s| s.slot).collect::<Vec<_>>(),
+            [1, 3]
+        );
+        let items: Vec<PlateBuildItem> = units
+            .iter()
+            .map(|(u, _)| PlateBuildItem {
+                filament_hex: u.filament_hex.clone(),
+                ..block(20.0, 20.0)
+            })
+            .collect();
+        assert_eq!(fp_mesh::assign_plate_filaments(&items, &opts).0, [3, 2, 3]);
+        assert!(build_plate_bytes(&items, opts).is_ok());
+        // No printer picked: plain 1, 2 in first-seen order.
+        let none = super::plate_options_for(&units, None, &[]);
+        assert!(none.loaded_slots.is_empty());
+        assert_eq!(none.bed, fp_mesh::PlateBed::default());
+        assert_eq!(fp_mesh::assign_plate_filaments(&items, &none).0, [1, 2, 1]);
+    }
+
     fn stl(tris: &[[[f32; 3]; 3]]) -> Vec<u8> {
         let mut b = vec![0u8; 80];
         b.extend_from_slice(&(tris.len() as u32).to_le_bytes());
@@ -433,14 +478,42 @@ fn plate_bed_for(bed_x_mm: Option<f64>, bed_y_mm: Option<f64>) -> Option<fp_mesh
 }
 
 /// Lays the plate out on the printer's bed when its size is known (errors if the parts
-/// don't fit), otherwise on the 220 mm default.
+/// don't fit), otherwise on the 220 mm default, and numbers its filaments by the printer's
+/// loaded slots when they're given. Takes a bare `Option<PlateBed>` too (no slot info).
 fn build_plate_bytes(
     items: &[PlateBuildItem],
-    bed: Option<fp_mesh::PlateBed>,
+    plate: impl Into<fp_mesh::PlateOptions>,
 ) -> Result<Vec<u8>, String> {
-    match bed {
-        Some(bed) => fp_mesh::write_3mf_plate_on_bed(items, bed),
-        None => write_3mf_plate(items),
+    fp_mesh::write_3mf_plate_with(items, &plate.into())
+}
+
+/// What the plate writer knows about the chosen printer: its bed (if set), its loaded
+/// filament slots, and which swatch each unit is printed in (index-aligned with `units`).
+fn plate_options_for(
+    units: &[(fp_core::PartUnit, String)],
+    bed: Option<fp_mesh::PlateBed>,
+    loaded_slots: &[fp_core::models::PrinterSlot],
+) -> fp_mesh::PlateOptions {
+    fp_mesh::PlateOptions {
+        bed: bed.unwrap_or_default(),
+        loaded_slots: loaded_slots
+            .iter()
+            .filter_map(|s| {
+                Some(fp_mesh::PlateSlot {
+                    slot: u32::try_from(s.slot_index).ok().filter(|n| *n > 0)?,
+                    filament_id: s.filament_id.clone(),
+                    filament_hex: s.filament_hex.clone(),
+                    material: s.material.clone(),
+                })
+            })
+            .collect(),
+        item_filaments: units
+            .iter()
+            .map(|(u, _)| fp_mesh::PlateItemFilament {
+                filament_id: u.filament_id.clone(),
+                material: u.filament_material.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -500,7 +573,7 @@ fn stage_and_open_plate(
     units_with_meshes: &[(fp_core::PartUnit, String)],
     meshes: &[fp_mesh::TriangleMesh],
     printer_name: Option<&str>,
-    bed: Option<fp_mesh::PlateBed>,
+    bed: fp_mesh::PlateOptions,
     slicer_choice: &slicer::SlicerChoice,
 ) -> Result<(String, usize, Option<slicer::Opened>), String> {
     if units_with_meshes.is_empty() {
@@ -567,16 +640,21 @@ fn print_handoff(
         let units = ledger
             .units_by_ids(&request.unit_ids)
             .map_err(|e| e.to_string())?;
-        let (name, bed) = match request.printer_id.as_deref() {
+        let (name, bed, slots) = match request.printer_id.as_deref() {
             Some(pid) => {
                 let (x, y) = ledger.printer_bed_mm(pid).map_err(|e| e.to_string())?;
                 (
                     ledger.printer_name(pid).map_err(|e| e.to_string())?,
                     plate_bed_for(x, y),
+                    ledger
+                        .printer_loaded_slots(pid)
+                        .map_err(|e| e.to_string())?,
                 )
             }
-            None => (None, None),
+            None => (None, None, Vec::new()),
         };
+        // The bed size plus the printer's loaded slots, so slot N is filament N in the slicer.
+        let bed = plate_options_for(&units, bed, &slots);
         (units, name, bed, choice)
     }; // ledger lock released here
        // Every model is read once, here, outside the ledger lock.
