@@ -212,40 +212,6 @@ export function applyAppearance(st: AppearanceStudio) {
   setVar("--fp-header-frost-tint", st.card_header_frost_enabled ? frostTint : "");
 }
 
-/** Outline strokes for a part thumbnail, outermost last, as stacked box-shadows. */
-export function thumbnailOutlineShadow(statusHex: string): string | undefined {
-  const st = current.appearance_studio;
-  if (!st.tile_outline_enabled || st.tile_outline_strokes.length === 0) return undefined;
-  let offset = 0;
-  const parts: string[] = [];
-  for (const s of st.tile_outline_strokes) {
-    const w = Math.max(0, s.weight || 0);
-    if (w <= 0) continue;
-    offset += w;
-    const raw = st.tile_outline_follows_status ? statusHex : firstHex(s.color) || statusHex;
-    parts.push(`0 0 0 ${offset}px ${withAlpha(raw, s.opacity)}`);
-  }
-  return parts.length ? parts.join(", ") : undefined;
-}
-
-/** When outlines follow status, Swift hides the tile ring. */
-export function outlineHidesRing(): boolean {
-  const st = current.appearance_studio;
-  return st.tile_outline_enabled && st.tile_outline_follows_status && st.tile_outline_strokes.length > 0;
-}
-
-function firstHex(token: string): string {
-  if (/^#[0-9a-f]{6}$/i.test(token)) return token;
-  const m = /(#[0-9a-f]{6})/i.exec(token || "");
-  return m ? m[1] : "";
-}
-function withAlpha(hex: string, opacity: number): string {
-  const a = Math.round(Math.min(1, Math.max(0, opacity)) * 255)
-    .toString(16)
-    .padStart(2, "0");
-  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${a}` : hex;
-}
-
 // --- Branding logo --------------------------------------------------------------
 
 async function refreshLogo(path: string) {

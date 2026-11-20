@@ -203,7 +203,7 @@ const KittingPartThumb: React.FC<{ unit: PartUnit; size: number }> = ({ unit, si
           style={{ width: size, height: size, objectFit: "contain", display: "block", filter: light ? LIGHT_PART_FILTER : "none" }}
         />
       ) : (
-        <PartThumb partName={unit.part_name} colorHex={unit.filament_hex} productId={unit.product_id} size={size} />
+        <PartThumb partName={unit.part_name} colorHex={unit.filament_hex} productId={unit.product_id} size={size} noOutline />
       )}
     </span>
   );

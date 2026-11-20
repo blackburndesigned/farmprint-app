@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { actorDevice } from "../../deviceLabel";
-import { getProcessSteps, outlineHidesRing, printerAccent, stepLabel, thumbnailOutlineShadow } from "../../settingsStore";
+import { getProcessSteps, printerAccent, stepLabel, useShopSettings } from "../../settingsStore";
+import { outlineReplacesRing } from "../../thumbnailOutline";
 import { showContextMenu } from "../../tauriInvoke";
 import { Order, OrderLine, PartUnit, TransitionRequest } from "../../types";
 import { isThumbnailOnlyUnit, PartThumb, ProductCompositeThumb } from "../../partThumbnails";
@@ -56,6 +57,7 @@ export const ShopOrderCard: React.FC<{
   onUnitTransition,
 }) => {
   const [expandedBand, setExpandedBand] = useState(false);
+  const hideRing = outlineReplacesRing(useShopSettings().appearance_studio);
   const primaryLine = line || order.lines[0];
   const rawUnits = useMemo(
     () => (line ? line.units : order.lines.flatMap((l) => l.units)),
@@ -352,10 +354,9 @@ export const ShopOrderCard: React.FC<{
                   borderRadius: 8,
                   background: "var(--fp-tile-bg, rgba(255,255,255,0.04))",
                   backdropFilter: "var(--fp-tile-backdrop, none)",
-                  border: outlineHidesRing()
+                  border: hideRing
                     ? "2.5px solid transparent"
                     : `2.5px solid ${uStep.bg}`,
-                  boxShadow: thumbnailOutlineShadow(uStep.bg),
                   padding: 0,
                   display: "flex",
                   alignItems: "center",
@@ -369,6 +370,7 @@ export const ShopOrderCard: React.FC<{
                   colorHex={u.filament_hex}
                   size={Math.max(20, tileSide - 8)}
                   productId={u.product_id}
+                  statusHex={uStep.bg}
                 />
                 {printerAccent(u.printer_id) && (
                   <span

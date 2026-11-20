@@ -2,6 +2,8 @@ import React from "react";
 import { Order, PartUnit, Printer, ShopSnapshot, TransitionRequest } from "../../types";
 import { PartThumbnail3D } from "../../components/PartThumbnail3D";
 import { statusStepFor } from "../OrdersAndonViews";
+import { useShopSettings } from "../../settingsStore";
+import { outlineReplacesRing } from "../../thumbnailOutline";
 
 export interface SuggestedPrintGroup {
   key: string; productId: string; productName: string; filamentName: string; filamentHex: string; material: string;
@@ -51,6 +53,7 @@ export const PartTile64: React.FC<{
   const customerLabel = order?.customer_name || unit.customer_name || unit.order_code;
   const orderCodeLabel = order?.order_code || unit.order_code;
   const step = statusStepFor(unit.state);
+  const hideRing = outlineReplacesRing(useShopSettings().appearance_studio);
   const move = (to_state: string, action_label: string, failure_reason: string | null = null) =>
     onTransition({
       unit_ids: [unit.id], to_state, printer_id: to_state === "Queued" ? null : unit.printer_id,
@@ -63,9 +66,9 @@ export const PartTile64: React.FC<{
       <div
         onClick={(e) => { if (onSelectUnit) { e.stopPropagation(); onSelectUnit(unit, e); } }}
         title={`${unit.part_name} · ${unit.filament_name} · ${customerLabel} (${orderCodeLabel})`}
-        style={{ position: "relative", width: box, height: box, boxSizing: "border-box", borderRadius: 10, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: `2.5px solid ${step.bg}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}
+        style={{ position: "relative", width: box, height: box, boxSizing: "border-box", borderRadius: 10, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: hideRing ? "2.5px solid transparent" : `2.5px solid ${step.bg}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}
       >
-        <PartThumbnail3D partName={unit.part_name} partId={unit.part_id} productId={unit.product_id} colorHex={unit.filament_hex} size={thumb} />
+        <PartThumbnail3D partName={unit.part_name} partId={unit.part_id} productId={unit.product_id} colorHex={unit.filament_hex} size={thumb} statusHex={step.bg} />
         <span style={{ position: "absolute", top: 4, left: 4, width: 9, height: 9, borderRadius: "50%", background: unit.filament_hex, border: "1px solid rgba(255,255,255,0.65)" }} />
         <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "8px 3px 2px", background: "linear-gradient(transparent, rgba(0,0,0,0.72))", fontSize: 9.5, fontWeight: 700, color: "#fff", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {unit.part_name}

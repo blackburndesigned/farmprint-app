@@ -4,6 +4,7 @@ import { splitHexAlpha } from "./platform";
 import { toCatalogUrl } from "./catalogUrl";
 import type { FilamentSwatch, Product } from "./types";
 import { findProductPart, isPictureOnlyPart } from "./partRules";
+import { useOutlinedSrc } from "./thumbnailOutline";
 
 /**
  * Base URL for catalog pictures/meshes. In the desktop app they live in the user's data
@@ -643,7 +644,11 @@ export const PartThumb: React.FC<{
   size?: number;
   productId?: string;
   className?: string;
-}> = ({ partName, colorHex, size = 54, productId, className }) => {
+  /** Process color, used when the Settings outline follows part status. */
+  statusHex?: string;
+  /** Skip the Settings outline (printed paper keeps its own look). */
+  noOutline?: boolean;
+}> = ({ partName, colorHex, size = 54, productId, className, statusHex, noOutline }) => {
   const [src, setSrc] = useState<string>(() => {
     const url = resolvePartCatalogPngUrl(partName, productId);
     const cacheKey = `${url}::${(colorHex || "#888888").toLowerCase()}::tile`;
@@ -663,10 +668,11 @@ export const PartThumb: React.FC<{
       alive = false;
     };
   }, [partName, colorHex, productId]);
+  const shown = useOutlinedSrc(src, size, statusHex, noOutline || src === PART_PLACEHOLDER_SRC);
 
   return (
     <img
-      src={src}
+      src={shown}
       onError={swapToPlaceholder}
       alt={partName}
       width={size}

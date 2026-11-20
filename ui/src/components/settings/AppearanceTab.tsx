@@ -3,6 +3,7 @@ import { AppearanceStudio, OutlineStroke, ShopSettings } from "../../types";
 import { Check, ColorInput, Row, Section, Segmented, type Setter, caption, chooseLogoPath, inputStyle } from "./settingsUi";
 import { notifyBanner } from "../../uiFeedback";
 import { errorText } from "../../errorText";
+import { DEFAULT_OUTLINE_STROKE, MAX_OUTLINE_STROKES } from "../../thumbnailOutline";
 
 // --- Appearance -----------------------------------------------------------------
 
@@ -229,7 +230,13 @@ export const AppearanceTab: React.FC<{ settings: ShopSettings; patch: Setter }> 
         <Check
           label="Outline part thumbnails"
           checked={st.tile_outline_enabled}
-          onChange={(v) => setSt({ tile_outline_enabled: v })}
+          onChange={(v) =>
+            setSt(
+              v && strokes.length === 0
+                ? { tile_outline_enabled: true, tile_outline_strokes: [{ ...DEFAULT_OUTLINE_STROKE }] }
+                : { tile_outline_enabled: v }
+            )
+          }
         />
         {st.tile_outline_enabled && (
           <>
@@ -295,7 +302,8 @@ export const AppearanceTab: React.FC<{ settings: ShopSettings; patch: Setter }> 
               <button
                 type="button"
                 className="fp-btn fp-btn-sm"
-                onClick={() => setSt({ tile_outline_strokes: [...strokes, { color: "", weight: 0, opacity: 0 }] })}
+                disabled={strokes.length >= MAX_OUTLINE_STROKES}
+                onClick={() => setSt({ tile_outline_strokes: [...strokes, { ...DEFAULT_OUTLINE_STROKE }] })}
               >
                 Add outline
               </button>
