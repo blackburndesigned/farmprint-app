@@ -284,6 +284,10 @@ export interface ShopSettings {
   units?: string;
   currency?: string;
   printer_multi_spool?: Record<string, boolean>;
+  /** Printers board grouping: "job" | "order" ("" = "job"). */
+  printers_board_view?: string;
+  /** Suggested Groups shows a small printer hint. Default off. */
+  suggest_printer?: boolean;
   navigation_chrome: string;
   part_grid_preferred_columns: number;
   appearance_mode: string;
@@ -391,6 +395,8 @@ export const EMPTY_SHOP_SETTINGS: ShopSettings = {
   print_queue_folder: "",
   group_print_queue_as_3mf: false,
   open_staged_in_slicer: false,
+  printers_board_view: "",
+  suggest_printer: false,
   slicer_app_name: "",
   slicer_bundle_id: "",
   slicer_app_path: "",

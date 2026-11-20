@@ -516,6 +516,12 @@ pub struct ShopSettings {
     pub printer_accents: std::collections::BTreeMap<String, String>,
     // Printers: printer_id -> has a multi-spool switcher (AMS or similar)
     pub printer_multi_spool: std::collections::BTreeMap<String, bool>,
+    /// Printers board grouping: "job" (each send/Print! batch as it was sent) | "order".
+    /// "" = "job".
+    pub printers_board_view: String,
+    /// Suggested Groups shows a small hint naming a printer that has the group's filament
+    /// loaded. Default off: FarmPrint doesn't pick a printer for you.
+    pub suggest_printer: bool,
     // Branding
     pub logo_path: String,
     // Appearance Studio
