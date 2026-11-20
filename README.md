@@ -12,7 +12,7 @@
 
 - **Orders.** Add orders by hand, or pull them in from your own web shop if you connect one. Each order shows a picture of the product the way the customer ordered it.
 - **Parts to Print.** Breaks every order down into the individual parts and colors that still need printing.
-- **Printers and plates.** Assign parts to your printers and send plates straight to Bambu Studio, with the order number, part name and filament color in each plate name.
+- **Printers and plates.** Assign parts to your printers and send them straight to Bambu Studio. Parts land on a plate there, each one named with its order number, part and color.
 - **ANDON board.** A big-screen view of what's printing, what's stuck and what needs attention.
 - **Kitting cards.** Printable cards with product pictures and a checkbox parts list for packing each order.
 - **Ready to Ship, History, Overstock and Production Value.** See what's ready to go out, what already went out, leftover parts you can reuse, and what your work is worth.
