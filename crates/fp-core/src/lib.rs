@@ -2544,7 +2544,7 @@ impl ShopLedger {
                     action_label, failure_reason, failure_note, cost_impact_cents,
                     (can_undo = 1 AND undone_at IS NULL AND unit_id IS NOT NULL AND from_state IS NOT NULL
                      AND source_surface <> ?1) AS undoable,
-                    batch_id, undone_at IS NOT NULL
+                    batch_id, undone_at IS NOT NULL, prev_plate_job_id
              FROM flow_events ORDER BY seq DESC LIMIT 500",
         )?;
         let rows = stmt
@@ -2579,6 +2579,7 @@ impl ShopLedger {
                     can_undo: r.get::<_, i64>(26)? != 0,
                     batch_id: r.get(27)?,
                     undone: r.get::<_, i64>(28)? != 0,
+                    prev_plate_job_id: r.get(29)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -3669,6 +3670,34 @@ mod tests {
         assert_eq!(u.printer_id.as_deref(), Some("prn-demo-2"));
         assert_eq!(u.reprint_count, 0);
         assert_eq!(after.analytics.total_reprint_loss_cents, 0);
+    }
+
+    #[test]
+    fn failure_note_and_job_round_trip_to_flow_events() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        ledger
+            .transition_units(tr(
+                &["unit-demo-1-base"],
+                "Printing",
+                Some("prn-demo-2"),
+                None,
+            ))
+            .unwrap();
+        let job = unit(&ledger, "unit-demo-1-base")
+            .unwrap()
+            .plate_job_id
+            .expect("Printing assigns a plate job");
+        let mut req = tr(&["unit-demo-1-base"], "Failed", None, Some("Other"));
+        req.failure_note = Some("Extruder Jam".to_string());
+        let snap = ledger.transition_units(req).unwrap();
+        let failed = snap
+            .flow_events
+            .iter()
+            .find(|e| e.kind == "FailedPrint")
+            .unwrap();
+        assert_eq!(failed.failure_reason.as_deref(), Some("Other"));
+        assert_eq!(failed.failure_note.as_deref(), Some("Extruder Jam"));
+        assert_eq!(failed.prev_plate_job_id.as_deref(), Some(job.as_str()));
     }
 
     #[test]

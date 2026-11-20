@@ -6,6 +6,8 @@ import { getProcessSteps, useShopSettings } from "../settingsStore";
 import { localTime } from "../uiFeedback";
 import { LazyMount } from "../components/LazyMount";
 import { isThumbnailOnlyPart } from "../partThumbnails";
+import { failureLabel, failureText } from "./flowJob";
+import { FlowJobDetail } from "./FlowJobDetail";
 
 export interface FlowViewProps {
   snapshot: ShopSnapshot;
@@ -46,6 +48,7 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
   const [search, setSearch] = useState("");
   const [onlyFailed, setOnlyFailed] = useState(false);
   const [clearedBefore, setClearedBefore] = useState<string>("");
+  const [detailUnitId, setDetailUnitId] = useState<string | null>(null);
   const settings = useShopSettings();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stages = useMemo(() => flowStages(), [settings.process_steps]);
@@ -164,10 +167,24 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
           const printerName = unit.printer_id ? printerNameById.get(unit.printer_id) : undefined;
           const lastEvent = events[events.length - 1];
           const undoable = onUndoEvent && lastEvent?.can_undo ? lastEvent : null;
+          const lastFailure = failedEvents.filter((f) => !f.undone).slice(-1)[0];
 
           return (
             <LazyMount key={unit.id} estimate={76} eager={rowIdx < 30}>
             <div
+              className="fp-flow-row"
+              role="button"
+              tabIndex={0}
+              aria-label={`${unit.part_name}, ${customerName}. Open job details.`}
+              title="Show this job's parts and history"
+              onClick={() => setDetailUnitId(unit.id)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDetailUnitId(unit.id);
+                }
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -177,6 +194,7 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                 background: "rgba(22,27,38,0.92)",
                 border: "1px solid rgba(255,255,255,0.09)",
                 flexWrap: "wrap",
+                cursor: "pointer",
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10, width: 250, flexShrink: 0 }}>
@@ -190,7 +208,14 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                   </div>
                   <div
                     style={{ fontSize: 11.5, fontWeight: 700, color: "#38bdf8", marginTop: 1, cursor: onSelectOrder ? "pointer" : undefined }}
-                    onClick={onSelectOrder ? () => onSelectOrder(unit.order_id) : undefined}
+                    onClick={
+                      onSelectOrder
+                        ? (e) => {
+                            e.stopPropagation();
+                            onSelectOrder(unit.order_id);
+                          }
+                        : undefined
+                    }
                     title={onSelectOrder ? "Open this order" : undefined}
                   >
                     {customerName} <span style={{ color: "rgba(235,235,245,0.5)", fontWeight: 500 }}>({unit.order_code})</span>
@@ -198,6 +223,15 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                   <div style={{ fontSize: 10.5, color: "rgba(235,235,245,0.6)", marginTop: 1 }}>
                     {unit.filament_name} {printerName ? `· 🖨 ${printerName}` : ""}
                   </div>
+                  {lastFailure && (
+                    <div
+                      title={failureLabel(lastFailure)}
+                      style={{ fontSize: 10.5, fontWeight: 800, color: "#ff6961", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                    >
+                      ✕ {failureLabel(lastFailure)}
+                      {failedEvents.length > 1 ? ` (×${failedEvents.length})` : ""}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -229,7 +263,7 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                         </div>
                         {st.id === "Printing" && (unit.reprint_count > 0 || stageFailed.length > 0) && (
                           <div style={{ fontSize: 9, fontWeight: 800, color: "#ff6961", marginTop: 2 }}>
-                            ✕ {stageFailed[0]?.failure_reason || `Reprint ×${unit.reprint_count}`}
+                            ✕ {(stageFailed.length > 0 && failureText(stageFailed[stageFailed.length - 1])) || `Reprint ×${unit.reprint_count}`}
                           </div>
                         )}
                       </div>
@@ -244,7 +278,10 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
                 <button
                   type="button"
                   className="fp-btn fp-btn-sm"
-                  onClick={() => void onUndoEvent!(undoable)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onUndoEvent!(undoable);
+                  }}
                   title={`Undo: ${undoable.action_label}`}
                 >
                   ↩︎ Undo
@@ -255,6 +292,13 @@ export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSel
           );
         })}
       </div>
+      {detailUnitId &&
+        (() => {
+          const u = trails.find((t) => t.unit.id === detailUnitId)?.unit;
+          return u ? (
+            <FlowJobDetail unit={u} snapshot={snapshot} onClose={() => setDetailUnitId(null)} onSelectOrder={onSelectOrder} />
+          ) : null;
+        })()}
     </div>
   );
 };
