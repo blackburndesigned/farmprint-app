@@ -3504,6 +3504,54 @@ mod tests {
         assert_eq!(undone.flow_events[0].to_state, "Queued");
     }
 
+    /// "Mark Printing" with no printer chosen: the parts still become one Printing job
+    /// (one plate job id, Flow events, one undo batch), just with no printer yet. Picking a
+    /// printer later moves the job onto it.
+    #[test]
+    fn printing_without_a_printer_is_one_unassigned_job() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let ids = ["unit-demo-1-base", "unit-demo-3-lid"];
+        ledger
+            .transition_units(tr(&ids, "Printing", None, None))
+            .unwrap();
+        let a = unit(&ledger, ids[0]).unwrap();
+        let b = unit(&ledger, ids[1]).unwrap();
+        assert_eq!(a.state, "Printing");
+        assert_eq!(b.state, "Printing");
+        assert_eq!(a.printer_id, None);
+        assert_eq!(b.printer_id, None);
+        let job = a.plate_job_id.clone().expect("a plate job id");
+        assert_eq!(b.plate_job_id.as_deref(), Some(job.as_str()));
+        let snap = ledger.snapshot().unwrap();
+        let evs: Vec<&FlowEvent> = snap
+            .flow_events
+            .iter()
+            .filter(|e| e.to_state == "Printing" && e.action_label == "To Printing")
+            .collect();
+        assert_eq!(evs.len(), 2);
+        assert!(evs.iter().all(|e| e.printer_id.is_none()));
+        assert!(evs.iter().all(|e| e.batch_id == evs[0].batch_id));
+
+        // Assigning a printer later puts the job on that printer.
+        ledger
+            .transition_units(tr(&ids, "Printing", Some("prn-demo-2"), None))
+            .unwrap();
+        assert_eq!(
+            unit(&ledger, ids[0]).unwrap().printer_id.as_deref(),
+            Some("prn-demo-2")
+        );
+
+        // Undoing that move puts the job back under no printer, with its old job id.
+        let latest = ledger.snapshot().unwrap().flow_events[0].id.clone();
+        ledger.undo_flow_event(&latest, "Test").unwrap();
+        for id in ids {
+            let u = unit(&ledger, id).unwrap();
+            assert_eq!(u.state, "Printing");
+            assert_eq!(u.printer_id, None);
+            assert_eq!(u.plate_job_id.as_deref(), Some(job.as_str()));
+        }
+    }
+
     fn unit(l: &ShopLedger, id: &str) -> Option<PartUnit> {
         l.snapshot()
             .unwrap()

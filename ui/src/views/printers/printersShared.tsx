@@ -6,6 +6,7 @@ import { useShopSettings } from "../../settingsStore";
 import { outlineReplacesRing } from "../../thumbnailOutline";
 import { Check, X } from "lucide-react";
 import { Icon } from "../../icons";
+import type { TransitionOptions } from "./markPrinting";
 
 export interface SuggestedPrintGroup {
   key: string; productId: string; productName: string; filamentName: string; filamentHex: string; material: string;
@@ -14,7 +15,8 @@ export interface SuggestedPrintGroup {
 
 export interface PrintersQueueCommonProps {
   snapshot: ShopSnapshot;
-  onTransition: (req: TransitionRequest) => void;
+  /** Runs a transition; `markPrinting` opens the printer picker for Mark Printing (no slicer). */
+  onTransition: (req: TransitionRequest, opts?: TransitionOptions) => void;
   onSelectUnit?: (unit: PartUnit, e: React.MouseEvent) => void;
   showSuggestedGroups?: boolean;
   onToggleSuggestedGroups?: (open: boolean) => void;

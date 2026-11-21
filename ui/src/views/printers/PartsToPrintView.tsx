@@ -20,7 +20,7 @@ import {
   toggleUnit,
   type Selection,
 } from "./partSelection";
-import { Package, Printer } from "lucide-react";
+import { CirclePlay, Package, Printer } from "lucide-react";
 import { Icon } from "../../icons";
 
 /** Header checkbox for a group: checked, unchecked, or mixed when only some are selected. */
@@ -256,22 +256,41 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
     },
   });
   const groupToggle = (ids: string[]) => () => setSelected((s) => toggleGroup(s, ids));
-  const sendSelection = () => {
+  // Mark Printing = Print! without the plate and slicer: same picker, same one job.
+  const sendSelection = (markPrinting = false) => {
     const units = selectedUnits;
     if (units.length === 0) return;
     // One request, so every part shares one plate job and one plate in the slicer.
     // No printer is preset: the picker always asks.
-    onTransition({
-      unit_ids: units.map((u) => u.id),
-      to_state: "Printing",
-      printer_id: null,
-      actor_device: "Mac Studio (FarmPrint)",
-      source_surface: "Parts to Print (selection)",
-      action_label: `Print ${units.length} selected part${units.length === 1 ? "" : "s"}`,
-      failure_reason: null,
-      failure_note: null,
-    });
+    onTransition(
+      {
+        unit_ids: units.map((u) => u.id),
+        to_state: "Printing",
+        printer_id: null,
+        actor_device: "Mac Studio (FarmPrint)",
+        source_surface: "Parts to Print (selection)",
+        action_label: `Print ${units.length} selected part${units.length === 1 ? "" : "s"}`,
+        failure_reason: null,
+        failure_note: null,
+      },
+      { markPrinting }
+    );
   };
+
+  const sendOrder = (units: PartUnit[], customer: string, markPrinting: boolean) =>
+    onTransition(
+      {
+        unit_ids: units.map((u) => u.id),
+        to_state: "Printing",
+        printer_id: null,
+        actor_device: "Mac Studio (FarmPrint)",
+        source_surface: "Parts to Print",
+        action_label: `Print Order ${customer}`,
+        failure_reason: null,
+        failure_note: null,
+      },
+      { markPrinting }
+    );
 
   const renderColorCard = (
     grp: SuggestedPrintGroup,
@@ -284,6 +303,22 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
     const hint = surface === "Suggested Groups" ? grp.suggestedPrinter : undefined;
     // Multi-select lives on the page itself, not in the Suggested Groups window.
     const selectable = !closeOnPrint;
+    // No printer is preselected unless the user turned the suggestion on;
+    // the "which printer?" picker always asks before anything is sent.
+    const sendGroup = (markPrinting: boolean) =>
+      onTransition(
+        {
+          unit_ids: grp.units.map((u) => u.id),
+          to_state: "Printing",
+          printer_id: hint?.id || null,
+          actor_device: "Mac Studio (FarmPrint)",
+          source_surface: surface,
+          action_label: `Print ${grp.units.length} ${grp.filamentName}`,
+          failure_reason: null,
+          failure_note: null,
+        },
+        { markPrinting }
+      );
     return (
       <div
         key={grp.key}
@@ -375,19 +410,32 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
             </span>
             <button
               type="button"
+              aria-label={`Mark ${grp.units.length} ${grp.filamentName} parts Printing without the slicer`}
+              title="Mark Printing: move these parts to Printing without opening the slicer"
               onClick={() => {
-                // No printer is preselected unless the user turned the suggestion on;
-                // the "which printer?" picker always asks before anything is sent.
-                onTransition({
-                  unit_ids: grp.units.map((u) => u.id),
-                  to_state: "Printing",
-                  printer_id: hint?.id || null,
-                  actor_device: "Mac Studio (FarmPrint)",
-                  source_surface: surface,
-                  action_label: `Print ${grp.units.length} ${grp.filamentName}`,
-                  failure_reason: null,
-                  failure_note: null,
-                });
+                sendGroup(true);
+                if (closeOnPrint) setOpen(false);
+              }}
+              style={{
+                padding: "3px 8px",
+                borderRadius: 999,
+                border: "1.5px solid rgba(255,255,255,0.85)",
+                background: "rgba(0,0,0,0.5)",
+                color: "#fff",
+                fontSize: 11.5,
+                fontWeight: 800,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <Icon icon={CirclePlay} size={13} /> Mark
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                sendGroup(false);
                 if (closeOnPrint) setOpen(false);
               }}
               style={{
@@ -623,20 +671,17 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                           <button
                             type="button"
                             className="fp-btn fp-btn-sm fp-btn-primary"
-                            onClick={() =>
-                              onTransition({
-                                unit_ids: ordUnits.map((u) => u.id),
-                                to_state: "Printing",
-                                printer_id: null,
-                                actor_device: "Mac Studio (FarmPrint)",
-                                source_surface: "Parts to Print",
-                                action_label: `Print Order ${ord.customer_name}`,
-                                failure_reason: null,
-                                failure_note: null,
-                              })
-                            }
+                            onClick={() => sendOrder(ordUnits, ord.customer_name, false)}
                           >
                             Print Order…
+                          </button>
+                          <button
+                            type="button"
+                            className="fp-btn fp-btn-sm"
+                            title="Mark Printing: move this order's waiting parts to Printing without opening the slicer"
+                            onClick={() => sendOrder(ordUnits, ord.customer_name, true)}
+                          >
+                            <Icon icon={CirclePlay} size={14} /> Mark Printing…
                           </button>
                         </div>
                       </div>
@@ -733,8 +778,16 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
       {selectedUnits.length > 0 && (
         <div className="fp-selection-bar" role="region" aria-label="Selected parts">
           <span>{selectionSummary(selectedUnits)}</span>
-          <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={sendSelection}>
+          <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => sendSelection(false)}>
             Send…
+          </button>
+          <button
+            type="button"
+            className="fp-btn fp-btn-sm"
+            onClick={() => sendSelection(true)}
+            title="Mark Printing: move the selected parts to Printing on a printer you pick, without opening the slicer"
+          >
+            <Icon icon={CirclePlay} size={14} /> Mark Printing…
           </button>
           <button type="button" className="fp-btn fp-btn-sm" onClick={clearSelection} title="Clear the selection (Esc)">
             Clear
