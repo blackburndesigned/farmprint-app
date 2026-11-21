@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke, showContextMenu } from "./tauriInvoke";
+import { CONFIRM_Z_INDEX } from "./layers";
 
 /**
  * Shared confirm dialog and banner bus.
@@ -56,7 +58,12 @@ export function useBannerBus(onBanner: (msg: string, opts?: BannerOptions) => vo
   }, []);
 }
 
-/** Mount once (App). Renders the pending confirmation above everything else. */
+/**
+ * Mount once (App). Renders the pending confirmation above everything else: it is portaled
+ * into <body> at CONFIRM_Z_INDEX, so it is never trapped under a sheet or modal that is
+ * itself portaled into <body> or stacked higher than the app shell (e.g. Settings ›
+ * Printers › edit sheet › Remove printer).
+ */
 export const ConfirmHost: React.FC = () => {
   const [queue, setQueue] = useState<ConfirmRequest[]>([]);
   useEffect(() => {
@@ -67,28 +74,32 @@ export const ConfirmHost: React.FC = () => {
     };
   }, []);
   const current = queue[0];
+  const currentRef = useRef<ConfirmRequest | undefined>(current);
+  currentRef.current = current;
   const finish = (ok: boolean) => {
     if (!current) return;
     current.resolve(ok);
     setQueue((q) => q.slice(1));
   };
+  // Registered once when the app mounts, before any sheet adds its own Escape handler, so
+  // stopImmediatePropagation keeps Esc from also closing the sheet behind the confirmation.
   useEffect(() => {
-    if (!current) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        finish(false);
-      }
+      const req = currentRef.current;
+      if (!req || e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      req.resolve(false);
+      setQueue((q) => (q[0] === req ? q.slice(1) : q));
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  });
+  }, []);
   if (!current) return null;
-  return (
+  return createPortal(
     <div
-      className="fp-modal-backdrop"
-      style={{ zIndex: 2000 }}
+      className="fp-modal-backdrop fp-confirm-layer"
+      style={{ zIndex: CONFIRM_Z_INDEX }}
       role="presentation"
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -130,7 +141,8 @@ export const ConfirmHost: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
