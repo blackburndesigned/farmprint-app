@@ -887,9 +887,9 @@ const UNKNOWN_FILAMENT_HEX: &str = "#808080";
 /// - A filament is told apart by its swatch id when the item has one, otherwise by its
 ///   normalized hex (the same identity the app uses for slots and color groups).
 /// - When the chosen printer has it loaded, it takes that slot's number, so FarmPrint's slot 3
-///   is filament 3 in the slicer and the AMS lines up without remapping. Matched by swatch id;
-///   an item without an id, or whose swatch isn't loaded under that id, matches a slot with the
-///   same hex and material (lowest slot wins).
+///   is filament 3 in the slicer and the AMS lines up without remapping. A slot matches when it
+///   holds the same swatch id, or the same hex and material. When several slots match (the
+///   same color loaded twice, e.g. a backup spool), the lowest-numbered one wins.
 /// - Filaments that aren't loaded take the lowest numbers no loaded slot uses, in the order
 ///   they first appear, so they never land on a spool holding another color.
 /// - With no slot info that is simply 1, 2, 3 in first-seen order.
@@ -925,18 +925,19 @@ pub fn assign_plate_filaments(
             per_item_group.push(g);
             continue;
         }
-        let by_id = (!id.is_empty())
-            .then(|| slots.iter().find(|s| s.filament_id.trim() == id))
-            .flatten();
-        let by_color = || {
-            hex.as_ref().and_then(|h| {
-                slots.iter().find(|s| {
-                    normalize_hex(&s.filament_hex).as_deref() == Some(h.as_str())
+        // Every slot holding this swatch or this color counts; the lowest-numbered one wins, so
+        // a color loaded in two slots (a backup spool for auto-refill) prints from the first.
+        let slot = slots
+            .iter()
+            .find(|s| {
+                let same_id = !id.is_empty() && s.filament_id.trim() == id;
+                let same_color = hex.as_deref().is_some_and(|h| {
+                    normalize_hex(&s.filament_hex).as_deref() == Some(h)
                         && mat_eq(&s.material, material)
-                })
+                });
+                same_id || same_color
             })
-        };
-        let slot = by_id.or_else(by_color);
+            .copied();
         let material = if !material.is_empty() {
             material.to_string()
         } else {
