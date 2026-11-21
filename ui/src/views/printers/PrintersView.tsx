@@ -13,6 +13,7 @@ import { isThumbnailOnlyPart } from "../../partThumbnails";
 import { Check, Circle, CircleDot, Palette, X } from "lucide-react";
 import { Icon } from "../../icons";
 import { loadIntoNextSlot, slotIdsByPosition, slotsHoldingSwatch, unloadSlot } from "./printerSlots";
+import { UNASSIGNED_LANE_ID, printerLaneUnits, unassignedLaneUnits } from "./markPrinting";
 
 export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   snapshot, onTransition, onSelectUnit, wallMode: controlledWall, onToggleWallMode, onSnapshotUpdated,
@@ -61,6 +62,21 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
     [snapshot.orders, productById]
   );
   const orderById = useMemo(() => new Map<string, Order>(snapshot.orders.map((o) => [o.id, o])), [snapshot.orders]);
+  // Jobs marked Printing (or Staged) with no printer, or on a printer that was removed,
+  // get their own "Unassigned" lane first on the board; it only shows when it has parts.
+  const unassignedUnits = useMemo(() => unassignedLaneUnits(allUnits, localPrinters), [allUnits, localPrinters]);
+  const lanes = useMemo<Printer[]>(
+    () =>
+      unassignedUnits.length > 0
+        ? [{ id: UNASSIGNED_LANE_ID, name: "Unassigned", model: "No printer", nozzle_mm: 0, status: "", loaded_slots: [], active_units: [], staged_units: [], remaining_minutes: 0, utilization_pct: 0 }, ...localPrinters]
+        : localPrinters,
+    [unassignedUnits.length, localPrinters]
+  );
+  const isUnassignedLane = (p: Printer) => p.id === UNASSIGNED_LANE_ID;
+  const laneUnitsFor = (p: Printer) => (isUnassignedLane(p) ? unassignedUnits : printerLaneUnits(allUnits, p.id));
+  /** The printer id a lane's Done action keeps: none for the Unassigned lane. */
+  const lanePrinterId = (p: Printer) => (isUnassignedLane(p) ? null : p.id);
+  const UNASSIGNED_ACCENT = "#64748b";
   const activeJobsCount = useMemo(() => allUnits.filter((u) => u.state === "Printing" || u.state === "Staged").length, [allUnits]);
 
   const handleConfirmFailure = () => {
@@ -173,9 +189,9 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
 
       {wallMode ? (
         <div className="fp-scroll" style={{ flex: 1, padding: "14px 18px 88px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16, alignContent: "start" }}>
-          {localPrinters.map((printer, idx) => {
-            const accent = printerAccent(printer.id) || printer.loaded_slots[0]?.filament_hex || LANE_COLORS[idx % LANE_COLORS.length];
-            const laneUnits = allUnits.filter((u) => u.printer_id === printer.id && (u.state === "Printing" || u.state === "Staged"));
+          {lanes.map((printer, idx) => {
+            const accent = isUnassignedLane(printer) ? UNASSIGNED_ACCENT : printerAccent(printer.id) || printer.loaded_slots[0]?.filament_hex || LANE_COLORS[idx % LANE_COLORS.length];
+            const laneUnits = laneUnitsFor(printer);
             const isPrinting = laneUnits.some((u) => u.state === "Printing");
             const totalMins = laneUnits.reduce((acc, u) => acc + (u.print_minutes || 0), 0);
             const customerNames = Array.from(new Set(laneUnits.map((u) => orderById.get(u.order_id)?.customer_name || u.customer_name))).join(" · ");
@@ -228,7 +244,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                 </div>
                 {laneUnits.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
-                    <button type="button" title="Mark whole job done" onClick={() => onTransition({ unit_ids: laneUnits.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers Wall TV", action_label: `Plate done on ${printer.name}`, failure_reason: null, failure_note: null })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #30d158", background: "rgba(48,209,88,0.22)", color: "#30d158", fontSize: 24, fontWeight: 900, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={Check} size={28} strokeWidth={3} /></button>
+                    <button type="button" title="Mark whole job done" onClick={() => onTransition({ unit_ids: laneUnits.map((u) => u.id), to_state: "Printed", printer_id: lanePrinterId(printer), actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers Wall TV", action_label: `Plate done on ${printer.name}`, failure_reason: null, failure_note: null })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #30d158", background: "rgba(48,209,88,0.22)", color: "#30d158", fontSize: 24, fontWeight: 900, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={Check} size={28} strokeWidth={3} /></button>
                     <button type="button" title="Mark whole job failed" onClick={() => setFailureModalTarget({ unitIds: laneUnits.map((u) => u.id), label: `All jobs on ${printer.name}` })} style={{ width: 54, height: 54, borderRadius: 14, border: "2px solid #ff453a", background: "rgba(255,69,58,0.22)", color: "#ff6961", fontSize: 24, fontWeight: 900, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon icon={X} size={28} strokeWidth={3} /></button>
                   </div>
                 )}
@@ -238,9 +254,9 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
         </div>
       ) : (
         <div style={{ flex: 1, display: "flex", gap: 12, overflowX: "auto", overflowY: "hidden", padding: "8px 18px 88px" }}>
-          {localPrinters.map((printer, idx) => {
-            const accent = printerAccent(printer.id) || printer.loaded_slots[0]?.filament_hex || LANE_COLORS[idx % LANE_COLORS.length];
-            const laneUnits = allUnits.filter((u) => u.printer_id === printer.id && (u.state === "Printing" || u.state === "Staged"));
+          {lanes.map((printer, idx) => {
+            const accent = isUnassignedLane(printer) ? UNASSIGNED_ACCENT : printerAccent(printer.id) || printer.loaded_slots[0]?.filament_hex || LANE_COLORS[idx % LANE_COLORS.length];
+            const laneUnits = laneUnitsFor(printer);
             const slices = groupLaneUnits(laneUnits, boardView);
             const lightText = prefersLightOnHex(accent);
             return (
@@ -251,10 +267,15 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     <div style={{ fontSize: 11, opacity: 0.84 }}>{laneCountLabel(slices, boardView)} · {laneUnits.length} parts · {laneUnits.some((u) => u.state === "Printing") ? "Printing" : "Idle"}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                    <button type="button" title={`Set loaded filament spools on ${printer.name}`} onClick={() => setEditingPrinterSlotsId(printer.id)} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.26)", color: "#fff", cursor: "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon icon={Palette} size={14} /></button>
+                    {!isUnassignedLane(printer) && <button type="button" title={`Set loaded filament spools on ${printer.name}`} onClick={() => setEditingPrinterSlotsId(printer.id)} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.26)", color: "#fff", cursor: "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon icon={Palette} size={14} /></button>}
                     <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(0,0,0,0.22)", color: "#fff" }}>{printer.model}</span>
                   </div>
                 </div>
+                {isUnassignedLane(printer) ? (
+                  <div style={{ padding: "6px 8px", fontSize: 11, color: "rgba(235,235,245,0.6)", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    Marked Printing with no printer · use Assign to pick one
+                  </div>
+                ) : (
                 <div onClick={() => setEditingPrinterSlotsId(printer.id)} title="Click to change loaded filament spools" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.06)", overflowX: "auto", cursor: "pointer" }}>
                   {printer.loaded_slots.length === 0 ? (
                     <span style={{ fontSize: 11, color: "rgba(235,235,245,0.55)" }}>+ No filament · tap to load spool</span>
@@ -268,6 +289,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     ))
                   )}
                 </div>
+                )}
                 <div style={{ flex: 1, overflowY: "auto", padding: 9, display: "flex", flexDirection: "column", gap: 8 }}>
                   {slices.length === 0 ? (
                     <div style={{ textAlign: "center", fontSize: 12, color: "rgba(235,235,245,0.45)", paddingTop: 18 }}>Idle</div>
@@ -305,7 +327,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                               <div style={{ fontSize: 10.5, fontWeight: 600, color: "#64d2ff" }}>{units.some((u) => u.state === "Printing") ? `Printing ~${Math.max(1, Math.round(totalMins / 60))}h` : "Staged on plate"}</div>
                             </div>
                             <div style={{ display: "flex", gap: 3 }}>
-                              <button type="button" className="fp-btn fp-btn-sm fp-btn-success" style={{ padding: "2px 6px" }} title="Mark plate done" onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printed", printer_id: printer.id, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: `Done: ${groupLabel}`, failure_reason: null, failure_note: null })}><Icon icon={Check} size={14} /></button>
+                              <button type="button" className="fp-btn fp-btn-sm fp-btn-success" style={{ padding: "2px 6px" }} title="Mark plate done" onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printed", printer_id: lanePrinterId(printer), actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: `Done: ${groupLabel}`, failure_reason: null, failure_note: null })}><Icon icon={Check} size={14} /></button>
                               <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" style={{ padding: "2px 6px" }} title="Mark plate failed" onClick={() => setFailureModalTarget({ unitIds: units.map((u) => u.id), label: `${groupLabel} on ${printer.name}` })}><Icon icon={X} size={14} /></button>
                             </div>
                           </div>
@@ -313,8 +335,8 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                             {units.map((u) => <PartTile64 key={u.id} unit={u} order={orderById.get(u.order_id)} onTransition={onTransition} onSelectUnit={onSelectUnit} sourceSurface="Printers" onRequestFailureReason={(ids, lbl) => setFailureModalTarget({ unitIds: ids, label: lbl })} />)}
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                            <select aria-label="Move job" value="" onChange={(e) => e.target.value && onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printing", printer_id: e.target.value, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: "Moved job to printer", failure_reason: null, failure_note: null })} style={{ background: "rgba(255,255,255,0.06)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, fontSize: 10.5, padding: "2px 6px" }}>
-                              <option value="">Move…</option>
+                            <select aria-label={isUnassignedLane(printer) ? "Assign job to a printer" : "Move job"} value="" onChange={(e) => e.target.value && onTransition({ unit_ids: units.map((u) => u.id), to_state: "Printing", printer_id: e.target.value, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: "Moved job to printer", failure_reason: null, failure_note: null }, { markPrinting: isUnassignedLane(printer) })} style={{ background: "rgba(255,255,255,0.06)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 6, fontSize: 10.5, padding: "2px 6px" }}>
+                              <option value="">{isUnassignedLane(printer) ? "Assign…" : "Move…"}</option>
                               {localPrinters.filter((p) => p.id !== printer.id).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                             <button type="button" className="fp-btn fp-btn-sm" style={{ padding: "2px 8px", fontSize: 10.5 }} onClick={() => onTransition({ unit_ids: units.map((u) => u.id), to_state: "Queued", printer_id: null, actor_device: "Mac Studio (FarmPrint)", source_surface: "Printers", action_label: "Returned job to In Queue", failure_reason: null, failure_note: null })}>Queue</button>

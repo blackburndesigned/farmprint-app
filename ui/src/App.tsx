@@ -45,6 +45,8 @@ import { clearOrderModelCache } from "./components/orderModelCache";
 import { KittingCardModal, OrderModals, UnitStatePopover } from "./views/ModalsAndDock";
 import { PeopleView, SettingsModal } from "./components/SettingsAndPeopleViews";
 import { ConfirmHost, askConfirm, useBannerBus } from "./uiFeedback";
+import { type PendingPrintPick, PrinterPickModal } from "./views/printers/PrinterPickModal";
+import { type TransitionOptions, canConfirmPick, confirmedPickRequest, transitionArgs } from "./views/printers/markPrinting";
 
 /** Banner text that reports a failure (shown without the ✓ and kept on screen longer). */
 const looksLikeError = (msg: string) =>
@@ -165,31 +167,31 @@ export default function App() {
     }
   };
 
-  // Print! asks which printer gets the job before anything goes to the slicer.
-  const [pendingPrint, setPendingPrint] = useState<{ req: TransitionRequest; printerId: string } | null>(null);
-  const runTransition = async (req: TransitionRequest, confirmed = false, allowWithoutSlicer = false) => {
-    if (!confirmed && req.to_state === "Printing" && !req.failure_reason) {
+  // Print! asks which printer gets the job before anything goes to the slicer. The same
+  // picker offers Mark Printing: the same job and history, with no .3mf and no slicer.
+  const [pendingPrint, setPendingPrint] = useState<PendingPrintPick | null>(null);
+  const runTransition = async (req: TransitionRequest, opts?: TransitionOptions) => {
+    const o: TransitionOptions = opts && typeof opts === "object" ? opts : {};
+    if (!o.confirmed && req.to_state === "Printing" && !req.failure_reason) {
       // Never preselect a printer id that doesn't exist in this shop.
       const known = snapshot.printers.some((p) => p.id === req.printer_id);
-      setPendingPrint({ req, printerId: known ? req.printer_id || "" : "" });
+      const ids = new Set(req.unit_ids);
+      const stagedOnPrinter = allUnits.some((u) => ids.has(u.id) && u.state === "Staged" && !!u.printer_id);
+      setPendingPrint({ req, printerId: known ? req.printer_id || "" : "", mode: o.markPrinting ? "mark" : "print", stagedOnPrinter });
       return;
     }
     try {
-      const updated = await invoke<ShopSnapshot>("transition_units", {
-        request: req,
-        allow_without_slicer: allowWithoutSlicer,
-      });
+      const updated = await invoke<ShopSnapshot>(
+        "transition_units",
+        transitionArgs(req, { allowWithoutSlicer: o.allowWithoutSlicer, skipSlicer: o.markPrinting })
+      );
       setSnapshot(updated);
       setActiveUnitMenu(null);
       // Newest undoable event written for these units = this action's batch.
       const ids = new Set(req.unit_ids);
       const own = updated.flow_events.find((ev) => ev.can_undo && ev.unit_id && ids.has(ev.unit_id));
-      flashBanner(
-        `${req.action_label} (${req.unit_ids.length} part${
-          req.unit_ids.length === 1 ? "" : "s"
-        })`,
-        { undoEventId: own?.id ?? null, error: false }
-      );
+      const label = o.markPrinting ? req.action_label : `${req.action_label} (${req.unit_ids.length} part${req.unit_ids.length === 1 ? "" : "s"})`;
+      flashBanner(label, { undoEventId: own?.id ?? null, error: false });
     } catch (e) {
       const m = errText(e);
       if (m.startsWith("Nothing was moved to Printing: the slicer could not be opened")) {
@@ -199,7 +201,7 @@ export default function App() {
           confirmLabel: "Mark Printing anyway",
           cancelLabel: "Leave in queue",
         });
-        if (anyway) void runTransition(req, true, true);
+        if (anyway) void runTransition(req, { confirmed: true, allowWithoutSlicer: true });
         else flashError("Nothing was moved to Printing.");
         return;
       }
@@ -697,34 +699,21 @@ export default function App() {
       <UpdateBanner />
       <ConfirmHost />
       {pendingPrint && (
-        <div className="fp-modal-backdrop" onClick={(e) => { e.stopPropagation(); setPendingPrint(null); }}>
-          <div className="fp-modal-window" role="dialog" aria-modal="true" style={{ width: "min(420px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="fp-modal-header">
-              <div className="fp-modal-title">Send {pendingPrint.req.unit_ids.length} part{pendingPrint.req.unit_ids.length === 1 ? "" : "s"} to which printer?</div>
-            </div>
-            <div className="fp-modal-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {snapshot.printers.length === 0 && <div style={{ opacity: 0.7, fontSize: 13 }}>Add a printer first, on the Printers tab.</div>}
-              {snapshot.printers.map((p) => (
-                <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, cursor: "pointer", background: pendingPrint.printerId === p.id ? "rgba(10,132,255,0.18)" : "transparent" }}>
-                  <input type="radio" name="fp-print-printer" checked={pendingPrint.printerId === p.id} onChange={() => setPendingPrint({ ...pendingPrint, printerId: p.id })} />
-                  <span style={{ fontWeight: 600 }}>{p.name}</span>
-                  {p.model && <span style={{ opacity: 0.6, fontSize: 12 }}>{p.model}{p.status ? ` · ${p.status}` : ""}</span>}
-                </label>
-              ))}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-                <button type="button" className="fp-btn fp-btn-sm" onClick={() => setPendingPrint(null)}>Cancel</button>
-                <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" disabled={!snapshot.printers.some((p) => p.id === pendingPrint.printerId)} title={snapshot.printers.some((p) => p.id === pendingPrint.printerId) ? undefined : "Pick a printer first"} onClick={() => {
-                  const { req, printerId } = pendingPrint;
-                  const prn = snapshot.printers.find((p) => p.id === printerId);
-                  if (!prn) return;
-                  const label = req.action_label.replace(/ (on|→) [^()]+$/, "");
-                  setPendingPrint(null);
-                  void runTransition({ ...req, printer_id: printerId || null, action_label: prn ? `${label} on ${prn.name}` : label }, true);
-                }}>Print!</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PrinterPickModal
+          pending={pendingPrint}
+          printers={snapshot.printers}
+          onChange={setPendingPrint}
+          onCancel={() => setPendingPrint(null)}
+          onConfirm={(mode) => {
+            const { req, printerId } = pendingPrint;
+            if (!canConfirmPick(mode, printerId, snapshot.printers)) return;
+            setPendingPrint(null);
+            void runTransition(confirmedPickRequest(req, mode, printerId, snapshot.printers), {
+              confirmed: true,
+              markPrinting: mode === "mark",
+            });
+          }}
+        />
       )}
       {useSidebar && !andonWallMode && (
         <SidebarNav

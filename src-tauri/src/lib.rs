@@ -1014,10 +1014,18 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .or_else(|| args.get("allowWithoutSlicer"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            // Set by "Mark Printing": the same job, printer and Flow history as Print!, but
+            // no plate is built, no .3mf is written and no slicer is opened.
+            let skip_slicer = args
+                .get("skip_slicer")
+                .or_else(|| args.get("skipSlicer"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let req_val = args.get("request").cloned().unwrap_or(args);
             let request: TransitionRequest =
                 serde_json::from_value(req_val).map_err(|e| e.to_string())?;
-            let should_handoff = request.to_state == "Printing" && request.failure_reason.is_none();
+            let should_handoff =
+                request.to_state == "Printing" && request.failure_reason.is_none() && !skip_slicer;
             if should_handoff {
                 let result = print_handoff(state, request, allow_without_slicer)?;
                 return serde_json::to_value(result.snapshot).map_err(|e| e.to_string());
@@ -3014,5 +3022,144 @@ mod multi_select_handoff_tests {
         )
         .unwrap_err();
         assert!(err.contains("bed"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod mark_printing_tests {
+    use super::{dispatch_invoke, AppState};
+    use fp_core::ShopLedger;
+    use serde_json::{json, Value};
+    use std::sync::Mutex;
+
+    /// An app state over the demo shop whose catalog folder has no saved models, so a real
+    /// Print! handoff can never build a plate here.
+    fn state_without_models() -> (AppState, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "fp-mark-printing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = AppState {
+            ledger: Mutex::new(ShopLedger::open_in_memory().unwrap()),
+            tracker_root: dir.clone(),
+            ui_dist_dir: dir.clone(),
+            ui_public_dir: dir.clone(),
+            data_dir: dir.clone(),
+            open_error: None,
+        };
+        (state, dir)
+    }
+
+    fn request(ids: &[&str], printer_id: Option<&str>) -> Value {
+        json!({
+            "unit_ids": ids,
+            "to_state": "Printing",
+            "printer_id": printer_id,
+            "actor_device": "Test",
+            "source_surface": "Parts to Print (selection)",
+            "action_label": "Marked parts Printing (no slicer)",
+            "failure_reason": null,
+            "failure_note": null,
+        })
+    }
+
+    fn units(snap: &Value) -> Vec<Value> {
+        snap["orders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|o| o["lines"].as_array().unwrap().iter())
+            .flat_map(|l| l["units"].as_array().unwrap().iter().cloned())
+            .collect()
+    }
+
+    #[test]
+    fn mark_printing_skips_the_slicer_but_makes_the_same_job() {
+        let (state, dir) = state_without_models();
+        let printer_id = state.ledger.lock().unwrap().snapshot().unwrap().printers[0]
+            .id
+            .clone();
+        let picked = ["unit-demo-1-base", "unit-demo-2-base", "unit-demo-2-lid"];
+        // Print! needs a saved model for every part, so it refuses and nothing moves.
+        let err = dispatch_invoke(
+            &state,
+            "transition_units",
+            json!({ "request": request(&picked, Some(&printer_id)) }),
+        )
+        .unwrap_err();
+        assert!(err.starts_with("Nothing was sent to the slicer"), "{err}");
+
+        // Mark Printing never builds a plate, so the same parts move. Named twice = moved once.
+        let mut ids = picked.to_vec();
+        ids.push("unit-demo-2-lid");
+        let snap = dispatch_invoke(
+            &state,
+            "transition_units",
+            json!({ "request": request(&ids, Some(&printer_id)), "skip_slicer": true }),
+        )
+        .unwrap();
+        let all = units(&snap);
+        let moved: Vec<&Value> = all
+            .iter()
+            .filter(|u| picked.contains(&u["id"].as_str().unwrap()))
+            .collect();
+        assert_eq!(moved.len(), 3);
+        let job = moved[0]["plate_job_id"].as_str().expect("a plate job id");
+        for u in &moved {
+            assert_eq!(u["state"], "Printing");
+            assert_eq!(u["printer_id"].as_str(), Some(printer_id.as_str()));
+            assert_eq!(u["plate_job_id"].as_str(), Some(job));
+        }
+        assert_eq!(
+            all.iter()
+                .filter(|u| u["plate_job_id"].as_str() == Some(job))
+                .count(),
+            3
+        );
+        // One Flow event per part, all in one undo batch.
+        let events: Vec<&Value> = snap["flow_events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| {
+                e["to_state"] == "Printing"
+                    && e["action_label"] == "Marked parts Printing (no slicer)"
+            })
+            .collect();
+        assert_eq!(events.len(), 3);
+        let batch = events[0]["batch_id"].clone();
+        assert!(events.iter().all(|e| e["batch_id"] == batch));
+        // Nothing was written next to the shop: no plate, no handoff folder.
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mark_printing_without_a_printer_is_an_unassigned_job() {
+        let (state, dir) = state_without_models();
+        let picked = ["unit-demo-1-base", "unit-demo-2-lid"];
+        let snap = dispatch_invoke(
+            &state,
+            "transition_units",
+            json!({ "request": request(&picked, None), "skipSlicer": true }),
+        )
+        .unwrap();
+        let moved: Vec<Value> = units(&snap)
+            .into_iter()
+            .filter(|u| picked.contains(&u["id"].as_str().unwrap()))
+            .collect();
+        assert_eq!(moved.len(), 2);
+        let job = moved[0]["plate_job_id"].as_str().unwrap().to_string();
+        for u in &moved {
+            assert_eq!(u["state"], "Printing");
+            assert!(u["printer_id"].is_null(), "{u}");
+            assert_eq!(u["plate_job_id"].as_str(), Some(job.as_str()));
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
