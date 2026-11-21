@@ -4,8 +4,9 @@ import { getProcessSteps, stepLabel } from "../../settingsStore";
 import { invoke } from "../../tauriInvoke";
 import { notifyError, pickFailureReason } from "../../uiFeedback";
 import { FilamentSwatch, PartUnit, Printer, ShopSnapshot, TransitionRequest } from "../../types";
-import { Palette, X } from "lucide-react";
+import { Check, Palette, X } from "lucide-react";
 import { Icon } from "../../icons";
+import { unitStatusRows } from "./unitStatusRows";
 
 export const UnitStatePopover: React.FC<{
   activeUnitMenu: { unit: PartUnit; x: number; y: number } | null;
@@ -142,41 +143,63 @@ export const UnitStatePopover: React.FC<{
         </div>
       ) : (
         <>
-          <div
-            style={{
-              fontSize: 11,
-              color: "rgba(235,235,245,0.55)",
-              marginBottom: 8,
-            }}
-          >
-            Current: {stepLabel(unit.state)} • Move &amp; log in Flow:
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {getProcessSteps().map(({ id: st, name: stName }) => (
-              <button
-                key={st}
-                className={`fp-btn ${unit.state === st ? "fp-btn-primary" : ""}`}
-                style={{ justifyContent: "space-between", width: "100%" }}
-                onClick={() =>
-                  onRunTransition({
-                    unit_ids: [unit.id],
-                    to_state: st,
-                    actor_device: actorDevice(),
-                    source_surface: "Part Tile Popover",
-                    printer_id:
-                      st === "Staged" || st === "Printing"
-                        ? unit.printer_id || sortedPrinters[0]?.id || null
-                        : unit.printer_id,
-                    action_label: `${unit.part_name} → ${stName}`,
-                    failure_reason: null,
-                    failure_note: null,
-                  })
-                }
-              >
-                <span>Move to {stName}</span>
-                <span>→</span>
-              </button>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+            {unitStatusRows(getProcessSteps(), unit.state, stepLabel(unit.state)).map(({ id: st, name: stName, current, label }) =>
+              current ? (
+                // Where the part is now: a marker, not an action.
+                <div
+                  key={st}
+                  className="fp-status-current"
+                  role="status"
+                  aria-current="step"
+                  aria-label={label}
+                  title={`${unit.part_name} is ${stName}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    width: "100%",
+                    padding: "5px 10px",
+                    borderRadius: 8,
+                    border: "1px dashed var(--border-strong, rgba(255,255,255,0.22))",
+                    color: "var(--text-secondary, rgba(235,235,245,0.6))",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "default",
+                    userSelect: "none",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <Icon icon={Check} size={14} />
+                  <span>{label}</span>
+                </div>
+              ) : (
+                <button
+                  key={st}
+                  type="button"
+                  className="fp-btn"
+                  style={{ justifyContent: "space-between", width: "100%" }}
+                  onClick={() =>
+                    onRunTransition({
+                      unit_ids: [unit.id],
+                      to_state: st,
+                      actor_device: actorDevice(),
+                      source_surface: "Part Tile Popover",
+                      printer_id:
+                        st === "Staged" || st === "Printing"
+                          ? unit.printer_id || sortedPrinters[0]?.id || null
+                          : unit.printer_id,
+                      action_label: `${unit.part_name} → ${stName}`,
+                      failure_reason: null,
+                      failure_note: null,
+                    })
+                  }
+                >
+                  <span>{label}</span>
+                  <span>→</span>
+                </button>
+              )
+            )}
             <button
               className="fp-btn fp-btn-danger"
               style={{ width: "100%" }}
