@@ -4065,6 +4065,51 @@ mod tests {
     }
 
     #[test]
+    fn printer_can_hold_the_same_filament_in_several_slots() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let pid = snap.printers[0].id.clone();
+        let black = snap.filaments[0].id.clone();
+        let other = snap.filaments[1].id.clone();
+        // Two spools of the same color: slots 1 and 3, with another color in slot 2.
+        let snap = ledger
+            .set_printer_filament_slots(&pid, vec![black.clone(), other.clone(), black.clone()])
+            .unwrap();
+        let slots = ledger.printer_loaded_slots(&pid).unwrap();
+        let got: Vec<(i64, &str)> = slots
+            .iter()
+            .map(|s| (s.slot_index, s.filament_id.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, black.as_str()),
+                (2, other.as_str()),
+                (3, black.as_str())
+            ]
+        );
+        // The snapshot shows every slot on its own, never merged by color.
+        let printer = snap.printers.iter().find(|p| p.id == pid).unwrap();
+        let snap_slots: Vec<(i64, &str)> = printer
+            .loaded_slots
+            .iter()
+            .map(|s| (s.slot_index, s.filament_id.as_str()))
+            .collect();
+        assert_eq!(snap_slots, got);
+        // Unloading one of the two keeps the other black slot on its own number.
+        ledger
+            .set_printer_filament_slots(&pid, vec![String::new(), other.clone(), black.clone()])
+            .unwrap();
+        let after: Vec<(i64, String)> = ledger
+            .printer_loaded_slots(&pid)
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.slot_index, s.filament_id))
+            .collect();
+        assert_eq!(after, vec![(2, other), (3, black)]);
+    }
+
+    #[test]
     fn printer_bed_size_is_optional_and_validated() {
         let mut ledger = ShopLedger::open_in_memory().unwrap();
         let snap = ledger.snapshot().unwrap();
