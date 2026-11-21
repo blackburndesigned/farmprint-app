@@ -372,3 +372,32 @@ fn importer_reads_object_ids_written_after_pid() {
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].name, "Widget");
 }
+
+#[test]
+fn a_color_loaded_in_several_slots_uses_the_lowest_one() {
+    // Same white in slots 2 and 5 (backup spool), loaded under the same swatch and under a
+    // duplicate swatch row; the plate always prints from slot 2.
+    let items = [cube("a", "#ffffff"), cube("b", "#ffffff")];
+    for slots in [
+        vec![slot(5, "white", "#ffffff"), slot(2, "white", "#ffffff")],
+        vec![slot(2, "white-dup", "#ffffff"), slot(5, "white", "#ffffff")],
+    ] {
+        let opts = PlateOptions {
+            loaded_slots: slots,
+            item_filaments: vec![fil("white"), PlateItemFilament::default()],
+            ..Default::default()
+        };
+        let (numbers, fils) = assign_plate_filaments(&items, &opts);
+        assert_eq!(numbers, [2, 2]);
+        assert_eq!(fils.len(), 1);
+        assert_eq!(fils[0].number, 2);
+    }
+    // An unloaded color still skips the backup slot so it never lands on that spool.
+    let items = [cube("w", "#ffffff"), cube("r", "#ff0000")];
+    let opts = PlateOptions {
+        loaded_slots: vec![slot(1, "white", "#ffffff"), slot(2, "white", "#ffffff")],
+        item_filaments: vec![fil("white"), fil("red")],
+        ..Default::default()
+    };
+    assert_eq!(assign_plate_filaments(&items, &opts).0, [1, 3]);
+}
