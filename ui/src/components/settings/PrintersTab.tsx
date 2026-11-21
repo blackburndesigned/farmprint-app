@@ -11,6 +11,7 @@ import { Check, ColorInput, PathRow, Row, Section, type Setter, caption, chooseP
 import { SLICERS, type SlicerKey, chooseSlicerAppPatch, pickSlicerPatch, savedSlicer } from "../../slicerChoice";
 import { Frame, X } from "lucide-react";
 import { Icon } from "../../icons";
+import { loadIntoNextSlot, loadedSlotCount, setSlotFilament, slotIdsByPosition, unloadSlot } from "../../views/printers/printerSlots";
 
 // --- Printers -------------------------------------------------------------------
 
@@ -102,7 +103,8 @@ const PrinterEditSheet: React.FC<{
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
-  const slotIds = (p.loaded_slots ?? []).map((s) => s.filament_id);
+  // By slot number: index k is Slot k + 1, "" an empty slot. The same color can fill several slots.
+  const slotIds = slotIdsByPosition(p.loaded_slots ?? []);
   const filamentById = new Map(filaments.map((f) => [f.id, f]));
   const setSlots = (ids: string[]) => void run("set_printer_filament_slots", { printer_id: p.id, filament_ids: ids });
   const commitName = () => {
@@ -168,7 +170,7 @@ const PrinterEditSheet: React.FC<{
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700 }}>Loaded filament</div>
               <span style={caption}>
-                {slotIds.length} of {MAX_FILAMENT_SLOTS} slots
+                {loadedSlotCount(slotIds)} of {MAX_FILAMENT_SLOTS} slots
               </span>
             </div>
             <div className="fp-form-group">
@@ -176,12 +178,12 @@ const PrinterEditSheet: React.FC<{
                 <div style={{ ...caption, padding: "8px 10px" }}>No filament loaded yet. Pick the colors on this printer so FarmPrint can match parts to it.</div>
               )}
               {slotIds.map((fid, i) => {
-                const f = filamentById.get(fid);
+                const f = fid ? filamentById.get(fid) : undefined;
                 return (
                   <div key={i} className="fp-form-row">
                     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <Swatch
-                        slot={{ slot_index: i, filament_id: fid, filament_name: f?.name || fid, filament_hex: f?.hex || "", material: f?.material || "" }}
+                        slot={{ slot_index: i + 1, filament_id: fid, filament_name: f?.name || fid || "Empty", filament_hex: f?.hex || "", material: f?.material || "" }}
                         size={20}
                       />
                       Slot {i + 1}
@@ -190,9 +192,10 @@ const PrinterEditSheet: React.FC<{
                       <select
                         aria-label={`Slot ${i + 1} filament`}
                         value={fid}
-                        onChange={(e) => setSlots(slotIds.map((x, k) => (k === i ? e.target.value : x)))}
+                        onChange={(e) => setSlots(setSlotFilament(slotIds, i + 1, e.target.value))}
                         style={{ ...sheetInput, flex: 1, maxWidth: 280 }}
                       >
+                        {!fid && <option value="">Empty</option>}
                         {filaments.map((fl) => (
                           <option key={fl.id} value={fl.id}>
                             {fl.brand} {fl.material} — {fl.name}
@@ -204,7 +207,7 @@ const PrinterEditSheet: React.FC<{
                         className="fp-btn fp-btn-sm fp-btn-ghost"
                         aria-label={`Unload slot ${i + 1}`}
                         title="Unload"
-                        onClick={() => setSlots(slotIds.filter((_, k) => k !== i))}
+                        onClick={() => setSlots(unloadSlot(slotIds, i + 1))}
                       >
                         <Icon icon={X} size={14} />
                       </button>
@@ -213,8 +216,8 @@ const PrinterEditSheet: React.FC<{
                 );
               })}
             </div>
-            {slotIds.length < MAX_FILAMENT_SLOTS && filaments.length > 0 && (
-              <button type="button" className="fp-btn fp-btn-sm" style={{ marginTop: 8 }} onClick={() => setSlots([...slotIds, filaments[0].id])}>
+            {loadedSlotCount(slotIds) < MAX_FILAMENT_SLOTS && filaments.length > 0 && (
+              <button type="button" className="fp-btn fp-btn-sm" style={{ marginTop: 8 }} onClick={() => setSlots(loadIntoNextSlot(slotIds, filaments[0].id))}>
                 + Add slot
               </button>
             )}

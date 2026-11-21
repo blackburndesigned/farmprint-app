@@ -2,7 +2,7 @@ import { FilamentLibrarySheet } from "../../components/FilamentLibrarySheet";
 import { printerAccent, saveShopSettingsPatch, useShopSettings } from "../../settingsStore";
 import React, { useEffect, useMemo, useState } from "react";
 import { invoke } from "../../tauriInvoke";
-import { FilamentSwatch, Order, OrderLine, PartUnit, Printer, PrinterSlot, Product, ShopSnapshot } from "../../types";
+import { FilamentSwatch, Order, OrderLine, PartUnit, Printer, Product, ShopSnapshot } from "../../types";
 import { ProductCompositeThumbnail3D } from "../../components/PartThumbnail3D";
 import { StatusLegendHeader } from "../OrdersAndonViews";
 import { BedSizeFields, parseBedSize } from "../../components/BedSizeFields";
@@ -12,6 +12,7 @@ import { groupLaneUnits, laneCountLabel } from "./laneGroups";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
 import { Check, Circle, CircleDot, Palette, X } from "lucide-react";
 import { Icon } from "../../icons";
+import { loadIntoNextSlot, slotIdsByPosition, slotsHoldingSwatch, unloadSlot } from "./printerSlots";
 
 export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   snapshot, onTransition, onSelectUnit, wallMode: controlledWall, onToggleWallMode, onSnapshotUpdated,
@@ -109,18 +110,20 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
     }
   };
 
-  const handleTogglePrinterFilamentSlot = async (printer: Printer, swatch: FilamentSwatch) => {
-    const exists = printer.loaded_slots.some((s) => s.filament_id === swatch.id || (s.filament_name === swatch.name && s.filament_hex === swatch.hex));
-    const nextSlots: PrinterSlot[] = exists
-      ? printer.loaded_slots.filter((s) => !(s.filament_id === swatch.id || (s.filament_name === swatch.name && s.filament_hex === swatch.hex))).map((s, idx) => ({ ...s, slot_index: idx }))
-      : [...printer.loaded_slots, { slot_index: printer.loaded_slots.length, filament_id: swatch.id, filament_name: swatch.name, filament_hex: swatch.hex, material: swatch.material }];
+  // Slots are positions, not a set of colors: the same spool color can be loaded in
+  // several slots, and unloading one slot leaves the others on their own numbers.
+  const savePrinterFilamentSlots = async (printer: Printer, filamentIds: string[]) => {
     try {
-      const updated = await invoke<ShopSnapshot>("set_printer_filament_slots", { printerId: printer.id, filamentIds: nextSlots.map((s) => s.filament_id) });
+      const updated = await invoke<ShopSnapshot>("set_printer_filament_slots", { printerId: printer.id, filamentIds });
       if (updated?.printers) { setLocalPrinters(updated.printers); onSnapshotUpdated?.(updated); }
     } catch (e) {
       notifyError(`${printer.name}'s filament slots were not saved`, e);
     }
   };
+  const handleLoadPrinterFilamentSlot = (printer: Printer, swatch: FilamentSwatch) =>
+    savePrinterFilamentSlots(printer, loadIntoNextSlot(slotIdsByPosition(printer.loaded_slots), swatch.id));
+  const handleUnloadPrinterFilamentSlot = (printer: Printer, slotNumber: number) =>
+    savePrinterFilamentSlots(printer, unloadSlot(slotIdsByPosition(printer.loaded_slots), slotNumber));
 
   const renderSliceComposite40 = (order?: Order, line?: OrderLine, unit?: PartUnit) => {
     const prod = line ? productById.get(line.product_id) : unit ? productById.get(unit.product_id) : undefined;
@@ -214,7 +217,8 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     </span>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {printer.loaded_slots.map((s) => (
-                        <span key={s.slot_index} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 999, background: "rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 700 }}>
+                        <span key={s.slot_index} title={`Slot ${s.slot_index}: ${s.filament_name}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 999, background: "rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 700 }}>
+                          <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{s.slot_index}</span>
                           <span style={{ width: 12, height: 12, borderRadius: "50%", background: s.filament_hex, border: "1.5px solid #fff" }} />
                           {s.filament_name}
                         </span>
@@ -256,7 +260,8 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     <span style={{ fontSize: 11, color: "rgba(235,235,245,0.55)" }}>+ No filament · tap to load spool</span>
                   ) : (
                     printer.loaded_slots.map((slot) => (
-                      <span key={slot.slot_index} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 7px", borderRadius: 999, background: "rgba(255,255,255,0.07)", fontSize: 10.5, fontWeight: 600 }}>
+                      <span key={slot.slot_index} title={`Slot ${slot.slot_index}: ${slot.filament_name}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 7px", borderRadius: 999, background: "rgba(255,255,255,0.07)", fontSize: 10.5, fontWeight: 600 }}>
+                        <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{slot.slot_index}</span>
                         <span style={{ width: 14, height: 14, borderRadius: "50%", background: slot.filament_hex, border: "2px solid rgba(255,255,255,0.75)", boxShadow: "inset 0 0 0 3px rgba(0,0,0,0.28)" }} />
                         <span>{slot.filament_name}</span>
                       </span>
@@ -364,21 +369,41 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
             <div className="fp-modal-header">
               <div>
                 <div className="fp-modal-title">{editingPrinter.name} — Loaded Filament Spools</div>
-                <div style={{ fontSize: 12, color: "rgba(235,235,245,0.6)" }}>Click any spool in your Filament Library to load or unload it on {editingPrinter.name}</div>
+                <div style={{ fontSize: 12, color: "rgba(235,235,245,0.6)" }}>Click a spool to load it into the next free slot on {editingPrinter.name}. Click it again to load the same color into another slot.</div>
               </div>
               <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => setEditingPrinterSlotsId(null)}>Done</button>
             </div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "10px 16px 0" }} aria-label={`Slots loaded on ${editingPrinter.name}`}>
+              {editingPrinter.loaded_slots.length === 0 ? (
+                <span style={{ fontSize: 12, color: "rgba(235,235,245,0.6)" }}>No slots loaded yet.</span>
+              ) : (
+                editingPrinter.loaded_slots.map((s) => (
+                  <span key={s.slot_index} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 3px 9px", borderRadius: 999, background: "rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 600, color: "#f8fafc" }}>
+                    <span style={{ fontSize: 10.5, color: "rgba(235,235,245,0.6)", fontVariantNumeric: "tabular-nums" }}>Slot {s.slot_index}</span>
+                    <span style={{ width: 12, height: 12, borderRadius: "50%", background: s.filament_hex, border: "1.5px solid rgba(255,255,255,0.8)" }} />
+                    {s.filament_name}
+                    <button type="button" aria-label={`Unload slot ${s.slot_index}`} title={`Unload slot ${s.slot_index}`} onClick={() => handleUnloadPrinterFilamentSlot(editingPrinter, s.slot_index)} style={{ width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.1)", color: "#f8fafc", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon icon={X} size={12} /></button>
+                  </span>
+                ))
+              )}
+            </div>
             <div className="fp-modal-body" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: 8 }}>
               {localFilaments.map((sw) => {
-                const loaded = editingPrinter.loaded_slots.some((s) => s.filament_id === sw.id || (s.filament_name === sw.name && s.filament_hex === sw.hex));
+                const inSlots = slotsHoldingSwatch(editingPrinter.loaded_slots, sw);
+                const loaded = inSlots.length > 0;
                 return (
-                  <button key={sw.id} type="button" onClick={() => handleTogglePrinterFilamentSlot(editingPrinter, sw)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: loaded ? "2px solid #38bdf8" : "1px solid rgba(255,255,255,0.12)", background: loaded ? "rgba(56,189,248,0.16)" : "rgba(255,255,255,0.04)", color: "#f8fafc", cursor: "pointer", textAlign: "left" }}>
+                  <button key={sw.id} type="button" title={loaded ? `In slot ${inSlots.join(", ")}. Click to load it into another slot.` : `Load into the next free slot`} onClick={() => handleLoadPrinterFilamentSlot(editingPrinter, sw)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: loaded ? "2px solid #38bdf8" : "1px solid rgba(255,255,255,0.12)", background: loaded ? "rgba(56,189,248,0.16)" : "rgba(255,255,255,0.04)", color: "#f8fafc", cursor: "pointer", textAlign: "left" }}>
                     <span style={{ width: 20, height: 20, borderRadius: "50%", background: sw.hex, border: "2px solid rgba(255,255,255,0.8)", flexShrink: 0 }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sw.name}</div>
                       <div style={{ fontSize: 10, color: "rgba(235,235,245,0.6)" }}>{sw.brand} · {sw.material}</div>
                     </div>
-                    {loaded && <span style={{ color: "#38bdf8", display: "inline-flex" }}><Icon icon={Check} size={16} strokeWidth={3} /></span>}
+                    {loaded && (
+                      <span style={{ color: "#38bdf8", display: "inline-flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 800 }}>
+                        <Icon icon={Check} size={16} strokeWidth={3} />
+                        {inSlots.length > 1 && <span>×{inSlots.length}</span>}
+                      </span>
+                    )}
                   </button>
                 );
               })}
