@@ -884,8 +884,8 @@ const UNKNOWN_FILAMENT_HEX: &str = "#808080";
 
 /// Gives every distinct filament on the plate a slicer filament number.
 ///
-/// - A filament is told apart by its swatch id when the item has one, otherwise by its
-///   normalized hex (the same identity the app uses for slots and color groups).
+/// - A filament is one color: normalized hex plus material. Items from different swatch rows
+///   with the same color share one filament number; the swatch id only helps find its slot.
 /// - When the chosen printer has it loaded, it takes that slot's number, so FarmPrint's slot 3
 ///   is filament 3 in the slicer and the AMS lines up without remapping. A slot matches when it
 ///   holds the same swatch id, or the same hex and material. When several slots match (the
@@ -907,8 +907,10 @@ pub fn assign_plate_filaments(
     slots.sort_by_key(|s| s.slot);
     let used_slots: std::collections::BTreeSet<u32> = slots.iter().map(|s| s.slot).collect();
 
-    // Distinct filaments in first-seen order: (key, hex, material, slot match).
-    let mut keys: Vec<String> = Vec::new();
+    // Distinct filaments in first-seen order. One color (hex + material) is one filament, even
+    // when it comes from different swatch rows, so it never takes two filament numbers.
+    // `keys` holds each group's (hex, material as the item gave it, possibly empty).
+    let mut keys: Vec<(String, String)> = Vec::new();
     let mut filaments: Vec<PlateFilament> = Vec::new();
     let mut per_item_group: Vec<usize> = Vec::with_capacity(items.len());
     for (idx, item) in items.iter().enumerate() {
@@ -916,15 +918,7 @@ pub fn assign_plate_filaments(
         let id = fil.map(|f| f.filament_id.trim()).unwrap_or("");
         let material = fil.map(|f| f.material.trim()).unwrap_or("");
         let hex = normalize_hex(&item.filament_hex);
-        let key = if !id.is_empty() {
-            format!("id:{id}")
-        } else {
-            format!("hex:{}", hex.as_deref().unwrap_or(UNKNOWN_FILAMENT_HEX))
-        };
-        if let Some(g) = keys.iter().position(|k| *k == key) {
-            per_item_group.push(g);
-            continue;
-        }
+        let group_hex = hex.as_deref().unwrap_or(UNKNOWN_FILAMENT_HEX);
         // Every slot holding this swatch or this color counts; the lowest-numbered one wins, so
         // a color loaded in two slots (a backup spool for auto-refill) prints from the first.
         let slot = slots
@@ -938,14 +932,27 @@ pub fn assign_plate_filaments(
                 same_id || same_color
             })
             .copied();
-        let material = if !material.is_empty() {
+        // An item that doesn't say its material takes the matched slot's, so it joins that
+        // color's group instead of whichever same-hex group came first.
+        let known_material = if !material.is_empty() {
             material.to_string()
         } else {
             slot.map(|s| s.material.trim().to_string())
-                .filter(|m| !m.is_empty())
-                .unwrap_or_else(|| "PLA".to_string())
+                .unwrap_or_default()
         };
-        keys.push(key);
+        if let Some(g) = keys
+            .iter()
+            .position(|(h, m)| h == group_hex && mat_eq(m, &known_material))
+        {
+            per_item_group.push(g);
+            continue;
+        }
+        keys.push((group_hex.to_string(), known_material.clone()));
+        let material = if known_material.is_empty() {
+            "PLA".to_string()
+        } else {
+            known_material
+        };
         per_item_group.push(filaments.len());
         filaments.push(PlateFilament {
             number: slot.map(|s| s.slot).unwrap_or(0),
