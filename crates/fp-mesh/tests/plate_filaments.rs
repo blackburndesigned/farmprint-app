@@ -401,3 +401,47 @@ fn a_color_loaded_in_several_slots_uses_the_lowest_one() {
     };
     assert_eq!(assign_plate_filaments(&items, &opts).0, [1, 3]);
 }
+
+#[test]
+fn one_color_never_takes_two_filament_numbers() {
+    // Same white from two swatch rows and from an item with no swatch id, none loaded.
+    let items = [
+        cube("a", "#ffffff"),
+        cube("b", "#FFF"),
+        cube("c", "#ffffff"),
+        cube("red", "#ff0000"),
+    ];
+    let opts = PlateOptions {
+        item_filaments: vec![
+            fil("white"),
+            fil("white-dup"),
+            PlateItemFilament::default(),
+            fil("red"),
+        ],
+        ..Default::default()
+    };
+    let (numbers, fils) = assign_plate_filaments(&items, &opts);
+    assert_eq!(numbers, [1, 1, 1, 2]);
+    assert_eq!(fils.len(), 2);
+    // Loaded under one swatch in two slots, used from the other swatch row: still one number.
+    let opts = PlateOptions {
+        loaded_slots: vec![slot(3, "white", "#ffffff"), slot(4, "white", "#ffffff")],
+        ..opts
+    };
+    let (numbers, fils) = assign_plate_filaments(&items, &opts);
+    assert_eq!(numbers, [3, 3, 3, 1]);
+    assert_eq!(fils.len(), 2);
+    // Same color in a different material is a different filament.
+    let items = [cube("pla", "#ffffff"), cube("petg", "#ffffff")];
+    let opts = PlateOptions {
+        item_filaments: vec![
+            fil("white"),
+            PlateItemFilament {
+                filament_id: "white-petg".into(),
+                material: "PETG".into(),
+            },
+        ],
+        ..Default::default()
+    };
+    assert_eq!(assign_plate_filaments(&items, &opts).0, [1, 2]);
+}
