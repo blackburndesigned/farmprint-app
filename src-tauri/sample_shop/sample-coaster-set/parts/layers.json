@@ -8,16 +8,16 @@
       "compositeZ": 0
     },
     {
-      "imageStem": "layer_coasters_a",
-      "iconStem": "coasters_a",
-      "name": "Coasters A",
+      "imageStem": "layer_coaster_a",
+      "iconStem": "coaster_a",
+      "name": "Coaster A",
       "partId": "sample-part-coaster-a",
       "compositeZ": 1
     },
     {
-      "imageStem": "layer_coasters_b",
-      "iconStem": "coasters_b",
-      "name": "Coasters B",
+      "imageStem": "layer_coaster_b",
+      "iconStem": "coaster_b",
+      "name": "Coaster B",
       "partId": "sample-part-coaster-b",
       "compositeZ": 2
     }

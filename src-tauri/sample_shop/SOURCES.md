@@ -18,7 +18,7 @@ commercial use allowed. Nothing CC-BY-NC, and nothing from a known designer.
 | Phone Stand | Stand, Lip Pad, Back Pad | Made for FarmPrint (`make_models.py`, `phone_stand`) | CC0 1.0 |
 | Mountain Keychain | Tag, Inlay, Split Ring | Made for FarmPrint (`make_models.py`, `keychain`) | CC0 1.0 |
 | Pen Cup | Foot Ring, Cup, Divider | Made for FarmPrint (`make_models.py`, `pen_cup`) | CC0 1.0 |
-| Coaster Set | Holder, Coasters A, Coasters B | Made for FarmPrint (`make_models.py`, `coaster_set`) | CC0 1.0 |
+| Coaster Set | Holder, Coaster A, Coaster B | Made for FarmPrint (`make_models.py`, `coaster_set`) | CC0 1.0 |
 | Key Rack with Shelf | Wall Plate, Shelf, Hooks | Made for FarmPrint (`make_models.py`, `key_rack`) | CC0 1.0 |
 | Bag Clip | Lower Arm, Upper Arm, Hinge Pin | Made for FarmPrint (`make_models.py`, `bag_clip`) | CC0 1.0 |
 

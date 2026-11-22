@@ -95,23 +95,23 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ),
     (
         "sample-coaster-set",
-        "coasters_a.png",
-        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_a.png"),
+        "coaster_a.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coaster_a.png"),
     ),
     (
         "sample-coaster-set",
-        "coasters_a.stl",
-        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_a.stl"),
+        "coaster_a.stl",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coaster_a.stl"),
     ),
     (
         "sample-coaster-set",
-        "coasters_b.png",
-        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_b.png"),
+        "coaster_b.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coaster_b.png"),
     ),
     (
         "sample-coaster-set",
-        "coasters_b.stl",
-        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_b.stl"),
+        "coaster_b.stl",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coaster_b.stl"),
     ),
     (
         "sample-coaster-set",
@@ -125,13 +125,13 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ),
     (
         "sample-coaster-set",
-        "layer_coasters_a.png",
-        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_coasters_a.png"),
+        "layer_coaster_a.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_coaster_a.png"),
     ),
     (
         "sample-coaster-set",
-        "layer_coasters_b.png",
-        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_coasters_b.png"),
+        "layer_coaster_b.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_coaster_b.png"),
     ),
     (
         "sample-coaster-set",
@@ -532,6 +532,190 @@ mod tests {
                 .unwrap_or_else(|| panic!("{pid}/{stl} missing"));
             let mesh = fp_mesh::parse_stl_bytes(bytes, &stl).unwrap();
             assert!(!mesh.indices.is_empty(), "{pid}/{stl}");
+        }
+    }
+
+    type Bounds = ([f32; 3], [f32; 3]);
+
+    /// Each sample product's part meshes, in layer order, read from the embedded STLs.
+    fn product_meshes(pid: &str) -> Vec<(String, fp_mesh::TriangleMesh)> {
+        let layers = FILES
+            .iter()
+            .find(|(p, f, _)| *p == pid && *f == "layers.json")
+            .map(|(_, _, b)| serde_json::from_slice::<serde_json::Value>(b).unwrap())
+            .unwrap();
+        layers["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| {
+                let stl = format!("{}.stl", l["iconStem"].as_str().unwrap());
+                let (_, _, bytes) = FILES
+                    .iter()
+                    .find(|(p, f, _)| *p == pid && *f == stl)
+                    .unwrap_or_else(|| panic!("{pid}/{stl} missing"));
+                let mesh = fp_mesh::parse_stl_bytes(bytes, &stl).unwrap();
+                (stl, mesh)
+            })
+            .collect()
+    }
+
+    fn touches(a: &Bounds, b: &Bounds, slack: f32) -> bool {
+        (0..3).all(|k| a.0[k] <= b.1[k] + slack && b.0[k] <= a.1[k] + slack)
+    }
+
+    /// Order previews draw each part at its STL coordinates (like an imported 3MF), so the
+    /// sample STLs must be the assembled product, not each part re-centred on its own.
+    #[test]
+    fn sample_parts_are_stored_assembled_in_one_product_frame() {
+        for pid in fp_core::sample::SAMPLE_PRODUCT_IDS {
+            let parts = product_meshes(pid);
+            assert!(parts.len() >= 2, "{pid}");
+            let bounds: Vec<Bounds> = parts.iter().map(|(_, m)| m.bounds()).collect();
+            // One frame per product: centred in XY, floor at z = 0.
+            let lo = (0..3).map(|k| bounds.iter().map(|b| b.0[k]).fold(f32::MAX, f32::min));
+            let hi = (0..3).map(|k| bounds.iter().map(|b| b.1[k]).fold(f32::MIN, f32::max));
+            let (lo, hi): (Vec<f32>, Vec<f32>) = (lo.collect(), hi.collect());
+            assert!(
+                (lo[0] + hi[0]).abs() < 0.1 && (lo[1] + hi[1]).abs() < 0.1,
+                "{pid} not centred"
+            );
+            assert!(lo[2].abs() < 0.01, "{pid} floor is not at z = 0");
+            // Not every part re-centred on the origin and dropped to z = 0 (the v0.9.26 bug).
+            let same = |a: &Bounds, b: &Bounds| {
+                (0..2).all(|k| ((a.0[k] + a.1[k]) - (b.0[k] + b.1[k])).abs() < 2.0)
+                    && (a.0[2] - b.0[2]).abs() < 1.0
+            };
+            assert!(
+                bounds.iter().any(|b| !same(b, &bounds[0])),
+                "{pid}: every part sits at the same spot, so the parts are not assembled"
+            );
+            // Assembled parts touch: every part is reachable from the first through contacts.
+            let mut reached = vec![false; bounds.len()];
+            reached[0] = true;
+            loop {
+                let mut grew = false;
+                for i in 0..bounds.len() {
+                    if !reached[i]
+                        && (0..bounds.len())
+                            .any(|j| reached[j] && touches(&bounds[i], &bounds[j], 0.5))
+                    {
+                        reached[i] = true;
+                        grew = true;
+                    }
+                }
+                if !grew {
+                    break;
+                }
+            }
+            for (i, r) in reached.iter().enumerate() {
+                assert!(
+                    r,
+                    "{pid}/{} is not attached to the rest of the product",
+                    parts[i].0
+                );
+            }
+        }
+    }
+
+    /// FarmPrint has no separate print pose: Print! only moves parts. So each sample part must
+    /// stand on a flat face in its assembled pose, and the plate writer must lay the product's
+    /// parts on the bed at z = 0 without overlapping.
+    #[test]
+    fn sample_parts_sit_flat_on_the_plate_without_overlap() {
+        use std::io::Read;
+        for pid in fp_core::sample::SAMPLE_PRODUCT_IDS {
+            let parts = product_meshes(pid);
+            for (stl, m) in &parts {
+                let zmin = m.bounds().0[2];
+                let contact: f32 = m
+                    .indices
+                    .iter()
+                    .map(|t| t.map(|i| m.positions[i as usize]))
+                    .filter(|v| v.iter().all(|p| (p[2] - zmin).abs() < 0.05))
+                    .map(|[a, b, c]| {
+                        ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() / 2.0
+                    })
+                    .sum();
+                assert!(
+                    contact >= 15.0,
+                    "{pid}/{stl} rests on only {contact:.1} mm² of bed"
+                );
+            }
+            let items: Vec<fp_mesh::PlateBuildItem> = parts
+                .iter()
+                .map(|(stl, m)| fp_mesh::PlateBuildItem {
+                    name: stl.clone(),
+                    filament_hex: "#808080".into(),
+                    mesh: m.clone(),
+                })
+                .collect();
+            let bed = fp_mesh::PlateBed {
+                width_mm: 256.0,
+                depth_mm: 256.0,
+            };
+            let bytes = fp_mesh::write_3mf_plate_on_bed(&items, bed)
+                .unwrap_or_else(|e| panic!("{pid}: {e}"));
+            let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+            let mut xml = String::new();
+            zip.by_name("3D/3dmodel.model")
+                .unwrap()
+                .read_to_string(&mut xml)
+                .unwrap();
+            let offsets: Vec<[f32; 3]> = xml
+                .split("transform=\"1 0 0 0 1 0 0 0 1 ")
+                .skip(1)
+                .map(|s| {
+                    let v: Vec<f32> = s
+                        .split('"')
+                        .next()
+                        .unwrap()
+                        .split(' ')
+                        .map(|n| n.parse().unwrap())
+                        .collect();
+                    [v[0], v[1], v[2]]
+                })
+                .collect();
+            assert_eq!(offsets.len(), parts.len(), "{pid}");
+            let placed: Vec<Bounds> = parts
+                .iter()
+                .zip(&offsets)
+                .map(|((_, m), o)| {
+                    let (lo, hi) = m.bounds();
+                    (
+                        [lo[0] + o[0], lo[1] + o[1], lo[2] + o[2]],
+                        [hi[0] + o[0], hi[1] + o[1], hi[2] + o[2]],
+                    )
+                })
+                .collect();
+            for (i, b) in placed.iter().enumerate() {
+                assert!(
+                    b.0[2].abs() < 0.01,
+                    "{pid}/{} is not on the bed",
+                    parts[i].0
+                );
+                assert!(
+                    b.0[0] >= -0.01 && b.0[1] >= -0.01,
+                    "{pid}/{} is off the bed",
+                    parts[i].0
+                );
+                assert!(
+                    b.1[0] <= 256.01 && b.1[1] <= 256.01,
+                    "{pid}/{} is off the bed",
+                    parts[i].0
+                );
+                for (j, c) in placed.iter().enumerate().skip(i + 1) {
+                    let apart = b.1[0] <= c.0[0]
+                        || c.1[0] <= b.0[0]
+                        || b.1[1] <= c.0[1]
+                        || c.1[1] <= b.0[1];
+                    assert!(
+                        apart,
+                        "{pid}: {} and {} overlap on the plate",
+                        parts[i].0, parts[j].0
+                    );
+                }
+            }
         }
     }
 
