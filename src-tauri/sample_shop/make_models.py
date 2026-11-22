@@ -14,6 +14,12 @@ Pictures are neutral grey; FarmPrint tints them with each part's filament color.
 
 FarmPrint has no separate print pose: Print! moves each part onto the bed (no rotation), so
 every part is designed to sit on a flat face in its assembled pose.
+
+Front: the shapes below are modelled with their front facing -X, but FarmPrint (like a
+slicer plate and the Swift app) treats -Y as a product's front: its default 3D camera and the
+Front preset look from -Y. So every STL is turned +90 degrees about Z on the way out
+(APP_FRAME), which puts -X at -Y. The pictures are rendered from the modelling frame with
+their own camera, so they are unaffected.
 """
 import json
 import math
@@ -331,6 +337,9 @@ PRODUCTS = {
     "sample-bag-clip": bag_clip,
 }
 
+# Modelling frame (front = -X) -> FarmPrint frame (front = -Y): +90 degrees about Z.
+APP_FRAME = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+
 # ---------- rendering -----------------------------------------------------------------------
 
 AZ, EL = math.radians(-35), math.radians(32)
@@ -437,8 +446,9 @@ def main():
             c1, s1 = bounds2d([(v, f)])
             sh1, ow1 = raster([(v, f)], ICON, c1, ICON * 0.80 / s1)
             to_image(sh1, ow1 == 0, ICON).save(os.path.join(out, f"{stem}.png"), optimize=True)
-            # The STL keeps the assembled pose, in the product frame (centred in XY, floor at z 0).
-            write_stl(os.path.join(out, f"{stem}.stl"), v - origin, f)
+            # The STL keeps the assembled pose, in the product frame (centred in XY, floor at z 0),
+            # turned so the product's front faces -Y (see APP_FRAME).
+            write_stl(os.path.join(out, f"{stem}.stl"), (v - origin) @ APP_FRAME.T, f)
             layers.append({"imageStem": f"layer_{stem}", "iconStem": stem, "name": name, "partId": part_id, "compositeZ": z})
         with open(os.path.join(out, "layers.json"), "w") as fh:
             json.dump({"layers": layers}, fh, indent=2); fh.write("\n")
