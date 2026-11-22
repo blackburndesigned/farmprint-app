@@ -1,0 +1,18 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_tray",
+      "iconStem": "tray",
+      "name": "Tray",
+      "partId": "sample-part-desk-tray",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_dividers",
+      "iconStem": "dividers",
+      "name": "Dividers",
+      "partId": "sample-part-desk-dividers",
+      "compositeZ": 1
+    }
+  ]
+}
