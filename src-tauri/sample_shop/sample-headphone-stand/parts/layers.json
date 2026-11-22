@@ -1,0 +1,25 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_base",
+      "iconStem": "base",
+      "name": "Base",
+      "partId": "sample-part-hp-base",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_post",
+      "iconStem": "post",
+      "name": "Post",
+      "partId": "sample-part-hp-post",
+      "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_hanger",
+      "iconStem": "hanger",
+      "name": "Hanger",
+      "partId": "sample-part-hp-hanger",
+      "compositeZ": 2
+    }
+  ]
+}

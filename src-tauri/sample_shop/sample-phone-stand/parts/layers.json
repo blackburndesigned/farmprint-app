@@ -4,15 +4,22 @@
       "imageStem": "layer_stand",
       "iconStem": "stand",
       "name": "Stand",
-      "partId": "sample-part-stand-stand",
+      "partId": "sample-part-phone-stand",
       "compositeZ": 0
     },
     {
-      "imageStem": "layer_pad",
-      "iconStem": "pad",
-      "name": "Pad",
-      "partId": "sample-part-stand-pad",
+      "imageStem": "layer_lip_pad",
+      "iconStem": "lip_pad",
+      "name": "Lip Pad",
+      "partId": "sample-part-phone-lip",
       "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_back_pad",
+      "iconStem": "back_pad",
+      "name": "Back Pad",
+      "partId": "sample-part-phone-back",
+      "compositeZ": 2
     }
   ]
 }

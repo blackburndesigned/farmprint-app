@@ -1,0 +1,25 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_lower_arm",
+      "iconStem": "lower_arm",
+      "name": "Lower Arm",
+      "partId": "sample-part-clip-lower",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_upper_arm",
+      "iconStem": "upper_arm",
+      "name": "Upper Arm",
+      "partId": "sample-part-clip-upper",
+      "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_hinge_pin",
+      "iconStem": "hinge_pin",
+      "name": "Hinge Pin",
+      "partId": "sample-part-clip-pin",
+      "compositeZ": 2
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_tag",
+      "iconStem": "tag",
+      "name": "Tag",
+      "partId": "sample-part-key-tag",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_inlay",
+      "iconStem": "inlay",
+      "name": "Inlay",
+      "partId": "sample-part-key-inlay",
+      "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_split_ring",
+      "iconStem": "split_ring",
+      "name": "Split Ring",
+      "partId": "sample-part-key-ring",
+      "compositeZ": 2
+    }
+  ]
+}

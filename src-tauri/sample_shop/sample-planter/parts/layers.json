@@ -1,0 +1,18 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_drip_tray",
+      "iconStem": "drip_tray",
+      "name": "Drip Tray",
+      "partId": "sample-part-planter-tray",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_pot",
+      "iconStem": "pot",
+      "name": "Pot",
+      "partId": "sample-part-planter-pot",
+      "compositeZ": 1
+    }
+  ]
+}

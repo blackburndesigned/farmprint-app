@@ -1,0 +1,25 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_holder",
+      "iconStem": "holder",
+      "name": "Holder",
+      "partId": "sample-part-coaster-holder",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_coasters_a",
+      "iconStem": "coasters_a",
+      "name": "Coasters A",
+      "partId": "sample-part-coaster-a",
+      "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_coasters_b",
+      "iconStem": "coasters_b",
+      "name": "Coasters B",
+      "partId": "sample-part-coaster-b",
+      "compositeZ": 2
+    }
+  ]
+}

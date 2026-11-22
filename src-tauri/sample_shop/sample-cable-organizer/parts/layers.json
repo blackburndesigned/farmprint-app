@@ -1,0 +1,18 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_grip_pad",
+      "iconStem": "grip_pad",
+      "name": "Grip Pad",
+      "partId": "sample-part-cable-pad",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_base",
+      "iconStem": "base",
+      "name": "Base",
+      "partId": "sample-part-cable-base",
+      "compositeZ": 1
+    }
+  ]
+}
