@@ -132,13 +132,59 @@ def headphone_stand():
     base = revolve([(0, 0), (48, 0), (50, 2), (50, 6), (44, 10), (0, 10)], 120)
     post = (Manifold.cylinder(150, 11, 8, 64).translate((0, 0, 10))
             - Manifold.cylinder(152, 7, 4.5, 48).translate((0, 0, 9)))
-    # Hanger: a peg into the post's bore, flaring at ~45 degrees into a curved saddle (a
-    # cap cut from a circle), so it prints standing on the peg with no supports.
-    cap = CrossSection.circle(46, 128) ^ poly([(-60, 32), (60, 32), (60, 60), (-60, 60)])
-    cap = cap.extrude(26).translate((0, 0, -13)).rotate((90, 0, 0)).translate((0, 0, 185 - 32))
-    collar = Manifold.cylinder(1, 8.5, 8.5, 48).translate((0, 0, 160))
-    peg = Manifold.cylinder(21, 4.3, 4.3, 32).translate((0, 0, 140))
-    hanger = (Manifold.batch_hull([collar, cap]) + cap + peg).rotate((0, 0, 90))
+    # Hanger: a wide arched saddle bar (SW mm across, SD deep) on a thin V web that widens
+    # upward at 45 degrees from a peg in the post's bore. The bar's underside is chamfered at
+    # 45 degrees down to the web, and the web's diamond cut-outs have 45-degree roofs, so the
+    # hanger prints standing exactly as assembled with no supports.
+    SW, SD, web, top, arc_r, z0, r0 = 110, 32, 10, 239, 200, 163, 4.3
+    half = SW / 2
+    bar, chamfer = 6, (SD - web) / 2              # bar thickness at full depth, chamfer height
+
+    def arc_z(x):
+        return top - (arc_r - math.sqrt(arc_r ** 2 - x ** 2))
+
+    xs = [half - i * SW / 40 for i in range(41)]
+    pieces = []
+    for xa, xb in zip(xs, xs[1:]):
+        pts = []
+        for x in (xa, xb):
+            z = arc_z(x)
+            pts += [(x, y, z) for y in (-SD / 2, SD / 2)]
+            pts += [(x, y, z - bar) for y in (-SD / 2, SD / 2)]
+            pts += [(x, y, z - bar - chamfer) for y in (-web / 2, web / 2)]
+        pieces.append(Manifold.hull_points(pts))
+    saddle_bar = Manifold.batch_boolean(pieces, OpType.Add)
+    # The web fills from the 45-degree V up into the bar (the bar's underside stays above it).
+    assert arc_z(half) - bar - chamfer >= z0 + (half - r0), "saddle bar ends would overhang"
+    outline = [(-r0, z0), (r0, z0), (half, z0 + half - r0)] + \
+        [(x, arc_z(x) - bar) for x in xs] + [(-half, z0 + half - r0)]
+
+    def diamond(cx, cz, k):
+        return poly([(cx, cz - k), (cx + k, cz), (cx, cz + k), (cx - k, cz)])
+
+    # Open truss: a centre stem and two 45-degree arms, with triangular windows between them
+    # whose roofs slope at 45 degrees (no flat ceilings to bridge).
+    strut, stem = 9 * math.sqrt(2), 5
+    windows = []
+    for sx in (1, -1):
+        x0 = stem
+        z_lo = z0 - r0 + x0 + strut                  # top of the arm at x0
+        z_hi = arc_z(x0) - bar - chamfer - 4          # just under the bar
+        apex = (z_hi - z_lo) / 2
+        windows.append(poly([(sx * x0, z_lo), (sx * x0, z_hi), (sx * (x0 + apex), z_lo + apex)]))
+        # Outer window between the arm and the bar, beyond the first one's roof.
+        xc = x0 + apex + 9
+        lo, hi = z0 - r0 + xc + strut + 1, arc_z(xc) - bar - chamfer - 3
+        if hi - lo > 14:  # only when there is room for a window that reads as one
+            k = (hi - lo) / 2
+            windows.append(diamond(sx * xc, lo + k, k))
+    face = poly(outline) - CrossSection.compose(windows)
+    web_m = face.extrude(web).translate((0, 0, -web / 2)).rotate((90, 0, 0))
+    peg = Manifold.cylinder(20, r0, r0, 32).translate((0, 0, 140))
+    # Short neck from the round peg to the web's rectangular foot (well under 45 degrees).
+    neck = Manifold.batch_hull([Manifold.cylinder(0.01, r0, r0, 32).translate((0, 0, 160)),
+                                Manifold.cube((2 * r0, web, 0.01)).translate((-r0, -web / 2, z0))])
+    hanger = (saddle_bar + web_m + neck + peg).rotate((0, 0, 90))
     return [
         ("base", "Base", "sample-part-hp-base", base),
         ("post", "Post", "sample-part-hp-post", post),
