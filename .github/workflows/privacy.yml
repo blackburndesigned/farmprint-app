@@ -13,4 +13,24 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - run: python3 scripts/privacy_scan.py
+          fetch-depth: 0
+      - name: Unit tests
+        run: python3 scripts/test_privacy_scan.py
+      - name: Scan files and pull request metadata
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/privacy_scan.py --branch-from-env PR_HEAD_REF --pr-title-from-env PR_TITLE --pr-body-from-env PR_BODY --commits-from-env BASE_SHA HEAD_SHA
+      - name: Scan files and pushed commits
+        if: github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 scripts/privacy_scan.py --commits-from-env BASE_SHA HEAD_SHA
+      - name: Scan tracked files
+        if: github.event_name != 'pull_request' && github.event_name != 'push'
+        run: python3 scripts/privacy_scan.py
