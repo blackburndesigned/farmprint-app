@@ -4,11 +4,16 @@
 Every shape here is simple geometry written for FarmPrint (no downloaded models), released
 under CC0 1.0 (see SOURCES.md). Run from this folder with `python3 make_models.py`
 (needs `pip install manifold3d numpy pillow`). Output per product:
-  <product_id>/parts/<stem>.stl        the part, flat on the bed, ready for Print!
+  <product_id>/parts/<stem>.stl        the part where it sits in the assembled product (one
+                                       shared frame per product, like an imported 3MF), so
+                                       the 3D previews show it put together
   <product_id>/parts/<stem>.png        part tile picture (256 px, part centred)
   <product_id>/parts/layer_<stem>.png  composite layer (512 px, shared product frame)
   <product_id>/parts/layers.json       layer order for the product picture
 Pictures are neutral grey; FarmPrint tints them with each part's filament color.
+
+FarmPrint has no separate print pose: Print! moves each part onto the bed (no rotation), so
+every part is designed to sit on a flat face in its assembled pose.
 """
 import json
 import math
@@ -57,6 +62,7 @@ def revolve(profile, seg=96):
 
 # ---------- the products --------------------------------------------------------------------
 # Each part: (stem, name, part id, Manifold placed where it sits in the assembled product).
+# The assembled pose is also the print pose, so each part needs a flat face at its lowest z.
 
 def phone_stand():
     # Side profile in X/Z (phone faces -X), extruded across Y.
@@ -78,12 +84,13 @@ def phone_stand():
     stand = stand - Manifold.cube((60, 16, 30)).translate((-58, -8, -1))
     lip_pad = prism([(-46, 16), (-38, 16), (-38, 18.5), (-46, 18.5)])
     lip_pad = lip_pad - Manifold.cube((60, 16, 30)).translate((-58, -8, -1))
-    back_pad = prism([along(30, 0), along(84, 0), along(84, 2.2), along(30, 2.2)], W - 14)
+    # Bottom edge cut level (not square to the backrest) so the pad stands on a flat face.
+    s_low = 30 - nz * 2.2 / uz
+    back_pad = prism([along(30, 0), along(84, 0), along(84, 2.2), along(s_low, 2.2)], W - 14)
     return [
         ("stand", "Stand", "sample-part-phone-stand", stand),
         ("lip_pad", "Lip Pad", "sample-part-phone-lip", lip_pad),
-        # Shown on the backrest, printed flat.
-        ("back_pad", "Back Pad", "sample-part-phone-back", back_pad, rrect(54, W - 14, 1).extrude(2.2)),
+        ("back_pad", "Back Pad", "sample-part-phone-back", back_pad),
     ]
 
 
@@ -125,13 +132,13 @@ def headphone_stand():
     base = revolve([(0, 0), (48, 0), (50, 2), (50, 6), (44, 10), (0, 10)], 120)
     post = (Manifold.cylinder(150, 11, 8, 64).translate((0, 0, 10))
             - Manifold.cylinder(152, 7, 4.5, 48).translate((0, 0, 9)))
-    # Hanger: a curved saddle (arc of a ring) on a short neck.
-    ring = CrossSection.circle(46, 128) - CrossSection.circle(36, 128)
-    clip = poly([(-60, 0), (60, 0), (60, 60), (-60, 60)])
-    saddle = (ring ^ clip).extrude(26)
-    saddle = saddle.translate((0, 0, -13)).rotate((90, 0, 0)).translate((0, 0, 160 - 46 + 2))
-    neck = Manifold.cylinder(14, 8.5, 8.5, 48).translate((0, 0, 140))
-    hanger = saddle.rotate((0, 0, 90)) + neck
+    # Hanger: a peg into the post's bore, flaring at ~45 degrees into a curved saddle (a
+    # cap cut from a circle), so it prints standing on the peg with no supports.
+    cap = CrossSection.circle(46, 128) ^ poly([(-60, 32), (60, 32), (60, 60), (-60, 60)])
+    cap = cap.extrude(26).translate((0, 0, -13)).rotate((90, 0, 0)).translate((0, 0, 185 - 32))
+    collar = Manifold.cylinder(1, 8.5, 8.5, 48).translate((0, 0, 160))
+    peg = Manifold.cylinder(21, 4.3, 4.3, 32).translate((0, 0, 140))
+    hanger = (Manifold.batch_hull([collar, cap]) + cap + peg).rotate((0, 0, 90))
     return [
         ("base", "Base", "sample-part-hp-base", base),
         ("post", "Post", "sample-part-hp-post", post),
@@ -188,7 +195,7 @@ def pen_cup():
 
 
 def coaster_set():
-    # Four square coasters (two colors, alternating) stacked in an open-front holder.
+    # Two square coasters (two colors) stacked in an open-front holder.
     S, t, gap = 96, 5, 1.2
     inner = S + 2 * gap
     holder = rrect(inner + 8, inner + 8, 6).extrude(18) - rrect(inner, inner, 3).extrude(30).translate((0, 0, 3))
@@ -203,13 +210,10 @@ def coaster_set():
         return c
 
     one = coaster()
-    a = Manifold.compose([one.translate((0, 0, 3 + i * t)) for i in (0, 2)])
-    b = Manifold.compose([one.translate((0, 0, 3 + i * t)) for i in (1, 3)])
-    flat = Manifold.compose([one, one.translate((S + 6, 0, 0))])
     return [
         ("holder", "Holder", "sample-part-coaster-holder", holder),
-        ("coasters_a", "Coasters A", "sample-part-coaster-a", a, flat),
-        ("coasters_b", "Coasters B", "sample-part-coaster-b", b, flat),
+        ("coaster_a", "Coaster A", "sample-part-coaster-a", one.translate((0, 0, 3))),
+        ("coaster_b", "Coaster B", "sample-part-coaster-b", one.translate((0, 0, 3 + t))),
     ]
 
 
@@ -221,23 +225,25 @@ def key_rack():
         plate = plate - Manifold.cylinder(t + 2, 2.4, 2.4, 24).rotate((0, 90, 0)).translate((-t - 1, y, Hh - 14))
     shelf = rrect(42, W - 10, 4).extrude(5).translate((-21 - t, 0, Hh - 5))
     lip = rrect(4, W - 10, 1.5).extrude(10).translate((-t - 40, 0, Hh - 5))
-    shelf = shelf + lip + poly([(0, 0), (-30, 0), (0, -22)]).extrude(6).translate((0, 0, -3)).rotate((90, 0, 0)).translate((-t, 0, Hh - 5)).translate((0, W / 2 - 30, 0)) \
-        + poly([(0, 0), (-30, 0), (0, -22)]).extrude(6).translate((0, 0, -3)).rotate((90, 0, 0)).translate((-t, -W / 2 + 30, Hh - 5))
+    # Back rail against the wall instead of under-shelf brackets, so the shelf prints flat.
+    rail = rrect(3, W - 10, 1).extrude(14).translate((-t - 1.5, 0, Hh - 5))
+    shelf = shelf + lip + rail
     # Hook profile in X/Z (sticks out -X, tip turns up), extruded across Y.
     prof = poly([(4, 0), (-30, 0), (-36, 3), (-38, 14), (-31, 14), (-30, 7), (-26, 6), (4, 6)])
     one = prof.extrude(10).translate((0, 0, -5)).rotate((90, 0, 0))
     ys = [-W / 2 + 40 + i * (W - 80) / 3 for i in range(4)]
     hooks = Manifold.compose([one.translate((-t + 4, y, 18)) for y in ys])
-    hooks_flat = Manifold.compose([prof.extrude(10).translate((0, i * 22, 0)) for i in range(4)])
     return [
         ("wall_plate", "Wall Plate", "sample-part-rack-plate", plate),
         ("shelf", "Shelf", "sample-part-rack-shelf", shelf),
-        ("hooks", "Hooks", "sample-part-rack-hooks", hooks, hooks_flat),
+        ("hooks", "Hooks", "sample-part-rack-hooks", hooks),
     ]
 
 
 def bag_clip():
-    # Two arms on a hinge pin, shown slightly open; lies flat, length along -X, hinge at x=0.
+    # Two arms on a hinge pin, shown slightly open. Built lying flat (length along -X, hinge
+    # axis along Y), then stood on its edge so every part prints as placed: the arms stand on
+    # a side face and the pin stands on its head.
     L, Wd, t, open_deg = 120, 18, 6, 6
     mid = 6.4                                    # width of the lower arm's centre knuckle
 
@@ -258,11 +264,12 @@ def bag_clip():
     upper_open = upper.translate((0, 0, -t)).rotate((0, open_deg, 0)).translate((0, 0, t))
     pin = (Manifold.cylinder(Wd + 1, 1.7, 1.7, 24)
            + Manifold.cylinder(1.6, 3.6, 3.6, 32).translate((0, 0, Wd + 1)))
+    pin = pin.rotate((-90, 0, 0)).translate((0, -Wd / 2 - 0.5, t))
+    on_edge = (-90, 0, 0)  # hinge axis Y -> -Z, pin head at the bottom
     return [
-        ("lower_arm", "Lower Arm", "sample-part-clip-lower", lower),
-        ("upper_arm", "Upper Arm", "sample-part-clip-upper", upper_open, upper.mirror((0, 0, 1))),
-        ("hinge_pin", "Hinge Pin", "sample-part-clip-pin", pin.rotate((-90, 0, 0)).translate((0, -Wd / 2 - 0.5, t)),
-         pin),
+        ("lower_arm", "Lower Arm", "sample-part-clip-lower", lower.rotate(on_edge)),
+        ("upper_arm", "Upper Arm", "sample-part-clip-upper", upper_open.rotate(on_edge)),
+        ("hinge_pin", "Hinge Pin", "sample-part-clip-pin", pin.rotate(on_edge)),
     ]
 
 PRODUCTS = {
@@ -352,7 +359,6 @@ def bounds2d(arrs):
 
 
 def write_stl(path, v, f):
-    v = v - [ (v[:, 0].min() + v[:, 0].max()) / 2, (v[:, 1].min() + v[:, 1].max()) / 2, v[:, 2].min()]
     with open(path, "wb") as fh:
         fh.write(b"FarmPrint sample part (CC0)".ljust(80, b" "))
         fh.write(struct.pack("<I", len(f)))
@@ -370,6 +376,9 @@ def main():
         parts = fn()
         out = os.path.join(OUT, pid, "parts"); os.makedirs(out, exist_ok=True)
         arrs = [mesh_arrays(p[3]) for p in parts]
+        allv = np.concatenate([v for v, _ in arrs])
+        lo, hi = allv.min(0), allv.max(0)
+        origin = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
         center, span = bounds2d(arrs)
         scale = FRAME * 0.84 / span
         shade, owner = raster(arrs, FRAME, center, scale)
@@ -382,8 +391,8 @@ def main():
             c1, s1 = bounds2d([(v, f)])
             sh1, ow1 = raster([(v, f)], ICON, c1, ICON * 0.80 / s1)
             to_image(sh1, ow1 == 0, ICON).save(os.path.join(out, f"{stem}.png"), optimize=True)
-            # The STL is the part as printed (an optional 5th entry when it is shown posed).
-            write_stl(os.path.join(out, f"{stem}.stl"), *(mesh_arrays(part[4]) if len(part) > 4 else (v, f)))
+            # The STL keeps the assembled pose, in the product frame (centred in XY, floor at z 0).
+            write_stl(os.path.join(out, f"{stem}.stl"), v - origin, f)
             layers.append({"imageStem": f"layer_{stem}", "iconStem": stem, "name": name, "partId": part_id, "compositeZ": z})
         with open(os.path.join(out, "layers.json"), "w") as fh:
             json.dump({"layers": layers}, fh, indent=2); fh.write("\n")
