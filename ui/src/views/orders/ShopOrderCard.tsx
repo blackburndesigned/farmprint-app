@@ -8,6 +8,7 @@ import { isThumbnailOnlyUnit, PartThumb, ProductCompositeThumb } from "../../par
 import { OrderLinePicture } from "../../orderLineThumbs";
 import { pickFailureReason } from "../../uiFeedback";
 import { isCompletedUnitState, progressColorHex, statusStepFor, unitMatchesStep } from "./orderStatus";
+import { partProductLabel } from "../../orderLabels";
 import { OrderLinesCompositeGrid, ShopOrderCardHeader } from "./ShopOrderCardParts";
 
 /**
@@ -356,7 +357,7 @@ export const ShopOrderCard: React.FC<{
                     });
                   });
                 }}
-                title={`${primaryLine?.product_name || "Product"} · ${u.part_name}: ${stepLabel(u.state)} · ${u.filament_name}`}
+                title={`${partProductLabel(u)}: ${stepLabel(u.state)} · ${u.filament_name}`}
                 style={{
                   width: tileSide,
                   height: tileSide,

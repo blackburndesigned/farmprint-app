@@ -6,6 +6,7 @@ import { orderAgeBadge } from "../../uiFeedback";
 import { LazyMount } from "../../components/LazyMount";
 import { unitMatchesStep } from "./orderStatus";
 import { StatusLegendHeader } from "./StatusLegendHeader";
+import { orderProductHeading } from "../../orderLabels";
 import { ShopOrderCard } from "./ShopOrderCard";
 
 export const AndonBoardView: React.FC<{
@@ -268,7 +269,7 @@ export const AndonBoardView: React.FC<{
                         {order.customer_name}
                       </div>
                       <div style={{ fontSize: 12.5, color: "rgba(235,235,245,0.68)" }}>
-                        {(line || order.lines[0])?.product_name} · {matchingUnits.length} part(s)
+                        {(line?.product_name || orderProductHeading(order.lines))} · {matchingUnits.length} part(s)
                       </div>
                     </div>
                     </LazyMount>

@@ -8,6 +8,7 @@ import { StatusLegendHeader } from "../OrdersAndonViews";
 import { BedSizeFields, parseBedSize } from "../../components/BedSizeFields";
 import { FAILURE_REASONS, confirmRemovePrinter, notifyError } from "../../uiFeedback";
 import { LANE_COLORS, PartTile64, type PrintersQueueCommonProps, prefersLightOnHex } from "./printersShared";
+import { lineForUnit, unitsProductHeading } from "../../orderLabels";
 import { groupLaneUnits, laneCountLabel } from "./laneGroups";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
 import { Check, Circle, CircleDot, Palette, X } from "lucide-react";
@@ -195,7 +196,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
             const isPrinting = laneUnits.some((u) => u.state === "Printing");
             const totalMins = laneUnits.reduce((acc, u) => acc + (u.print_minutes || 0), 0);
             const customerNames = Array.from(new Set(laneUnits.map((u) => orderById.get(u.order_id)?.customer_name || u.customer_name))).join(" · ");
-            const productLabel = laneUnits[0]?.product_name || "Idle — Ready for next plate";
+            const productLabel = unitsProductHeading(laneUnits) || "Idle — Ready for next plate";
             return (
               <div
                 key={printer.id}
@@ -299,7 +300,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                       const orderIds = Array.from(new Set(units.map((u) => u.order_id)));
                       // One order in the group: that order's picture and name, as before.
                       const ord = orderIds.length === 1 ? orderById.get(orderIds[0]) : undefined;
-                      const line = ord?.lines.find((l) => l.id === first.line_id) || ord?.lines[0];
+                      const line = first && ord ? lineForUnit(ord, first) : undefined;
                       const totalMins = units.reduce((acc, u) => acc + (u.print_minutes || 0), 0);
                       const customerOf = (u: PartUnit) => orderById.get(u.order_id)?.customer_name || u.customer_name || u.order_code;
                       const customers = Array.from(new Set(units.map(customerOf)));
