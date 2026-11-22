@@ -58,57 +58,32 @@ def revolve(profile, seg=96):
 # ---------- the products --------------------------------------------------------------------
 # Each part: (stem, name, part id, Manifold placed where it sits in the assembled product).
 
-def flexi_dragon():
-    # Print-in-place style segmented body (each link is its own plate with a hinge web), a
-    # snap-on head and a pair of wings. Wings print flat and are shown raised.
-    path = lambda t: (34 - 118 * t, 9 * math.sin(t * math.pi * 1.6))
-    links = []
-    n = 12
-    for i in range(n):
-        t = i / (n - 1)
-        x, y = path(t)
-        w = 34 - 24 * t
-        h = 11 - 5.5 * t
-        plate = CrossSection.hull(CrossSection.compose([
-            CrossSection.circle(w / 2, 40).scale((0.5, 1)),
-        ])).extrude(h).translate((x, y, 0))
-        crest = Manifold.cylinder(5.5 - 3 * t, 3.2 - 1.6 * t, 0.3, 4).translate((x, y, h - 0.3))
-        links += [plate, crest]
-        if i < n - 1:
-            x2, y2 = path((i + 1) / (n - 1))
-            links.append(Manifold.hull(Manifold.compose([
-                Manifold.cylinder(h * 0.5, 2.2, 2.2, 16).translate((x, y, 0)),
-                Manifold.cylinder(h * 0.5, 2.2, 2.2, 16).translate((x2, y2, 0))])))
-    tx, ty = path(1.0)
-    links.append(poly(ccw([(4, -6), (-12, 0), (4, 6)])).extrude(4).translate((tx, ty, 0)))
-    for (t, s) in ((0.08, 1), (0.08, -1), (0.42, 1), (0.42, -1)):
-        x, y = path(t)
-        links.append(Manifold.hull(Manifold.compose([
-            Manifold.cylinder(4, 3, 3, 16).translate((x, y, 0)),
-            Manifold.cylinder(4, 3.6, 3.6, 16).translate((x + 4, y + s * 20, 0))])))
-        for k in (-1, 0, 1):
-            links.append(Manifold.cylinder(4, 1.6, 1.6, 12).translate((x + 8, y + s * 20 + k * 3, 0)))
-    body = Manifold.batch_boolean(links, OpType.Add)
-    head = Manifold.batch_boolean([
-        Manifold.hull(Manifold.compose([
-            Manifold.sphere(1, 32).scale((13, 12, 8)).translate((0, 0, 7)),
-            Manifold.sphere(1, 32).scale((8, 7, 5)).translate((18, 0, 6))])),
-        Manifold.cylinder(11, 2.4, 0.3, 16).rotate((0, -60, 0)).translate((-3, 5, 9)),
-        Manifold.cylinder(11, 2.4, 0.3, 16).rotate((0, -60, 0)).translate((-3, -5, 9)),
-    ], OpType.Add).trim_by_plane((0, 0, 1), 0)
-    head = head - Manifold.sphere(2.2, 16).translate((8, 8.4, 10)) - Manifold.sphere(2.2, 16).translate((8, -8.4, 10))
-    head = head.translate((44, 0, 0))
-    pts = [(0, 0), (6, 14), (3, 34), (-5, 29), (-10, 37), (-17, 27), (-25, 31), (-28, 19), (-36, 20), (-28, 5)]
-    def wing(sign, lift):
-        w = poly(ccw([(x, sign * y) for x, y in pts])).extrude(2.2)
-        return w.rotate((sign * lift, 0, 0)).translate((22, sign * 8, 9.5))
-    wings_print = wing(1, 0) + wing(-1, 0)
-    wings_show = wing(1, 34) + wing(-1, 34)
-    turn = lambda m: m.rotate((0, 0, 200))   # head toward the camera
+def phone_stand():
+    # Side profile in X/Z (phone faces -X), extruded across Y.
+    W, lean = 78, math.radians(25)
+    ux, uz = math.sin(lean), math.cos(lean)        # up the backrest
+    nx, nz = -math.cos(lean), math.sin(lean)       # out of the backrest's front face
+    L, t = 96, 7.5
+
+    def prism(pts, w=W):
+        return poly(pts).extrude(w).translate((0, 0, -w / 2)).rotate((90, 0, 0))
+
+    def along(s, off):
+        return (12 + ux * s + nx * off, 4 + uz * s + nz * off)
+
+    back = prism([(12, 0), (12 + t / math.cos(lean), 0), along(L, -t), along(L, 0), (12, 4)])
+    base = prism([(-46, 0), (40, 0), (40, 4), (-38, 4), (-38, 16), (-46, 16)])
+    stand = base + back
+    # Cable slot through the lip and base, centred.
+    stand = stand - Manifold.cube((60, 16, 30)).translate((-58, -8, -1))
+    lip_pad = prism([(-46, 16), (-38, 16), (-38, 18.5), (-46, 18.5)])
+    lip_pad = lip_pad - Manifold.cube((60, 16, 30)).translate((-58, -8, -1))
+    back_pad = prism([along(30, 0), along(84, 0), along(84, 2.2), along(30, 2.2)], W - 14)
     return [
-        ("body", "Body", "sample-part-dragon-body", turn(body)),
-        ("wings", "Wings", "sample-part-dragon-wings", turn(wings_show), wings_print),
-        ("head", "Head", "sample-part-dragon-head", turn(head)),
+        ("stand", "Stand", "sample-part-phone-stand", stand),
+        ("lip_pad", "Lip Pad", "sample-part-phone-lip", lip_pad),
+        # Shown on the backrest, printed flat.
+        ("back_pad", "Back Pad", "sample-part-phone-back", back_pad, rrect(54, W - 14, 1).extrude(2.2)),
     ]
 
 
@@ -188,17 +163,119 @@ def keychain():
     return [
         ("tag", "Tag", "sample-part-key-tag", tag),
         ("inlay", "Inlay", "sample-part-key-inlay", inlay),
-        ("ring", "Split Ring", "sample-part-key-ring", ring),
+        ("split_ring", "Split Ring", "sample-part-key-ring", ring),
     ]
 
 
+def pen_cup():
+    # Flared hexagonal cup sitting in a foot ring, with a three-way divider inside.
+    H, R, wall, floor, flare = 100, 36, 2.4, 2.4, 1.14
+    cup = (CrossSection.circle(R, 6).extrude(H, 0, 0, (flare, flare))
+           - CrossSection.circle(R - wall / math.cos(math.pi / 6), 6).extrude(H, 0, 0, (flare, flare))
+           .translate((0, 0, floor)))
+    cup = cup.translate((0, 0, 3))
+    foot = revolve([(0, 0), (R + 4, 0), (R + 4, 8), (R + 0.4, 8), (R + 0.4, 3), (0, 3)], 6)
+    reach = (R - wall) * math.cos(math.pi / 6) - 1.5  # stays inside the narrowest (bottom) wall
+    blade = rrect(reach, 2.2, 1).extrude(H - 12).translate((reach / 2, 0, 0))
+    divider = Manifold.compose([blade.rotate((0, 0, a)) for a in (30, 150, 270)])
+    divider = divider + Manifold.cylinder(H - 12, 3.2, 3.2, 24)
+    divider = divider.translate((0, 0, 3 + floor))
+    return [
+        ("foot_ring", "Foot Ring", "sample-part-pen-foot", foot),
+        ("cup", "Cup", "sample-part-pen-cup", cup),
+        ("divider", "Divider", "sample-part-pen-divider", divider),
+    ]
+
+
+def coaster_set():
+    # Four square coasters (two colors, alternating) stacked in an open-front holder.
+    S, t, gap = 96, 5, 1.2
+    inner = S + 2 * gap
+    holder = rrect(inner + 8, inner + 8, 6).extrude(18) - rrect(inner, inner, 3).extrude(30).translate((0, 0, 3))
+    # Open the front (-X) so the stack slides out.
+    holder = holder - rrect(60, inner + 40, 10).extrude(30).translate((-inner / 2, 0, 6))
+
+    def coaster():
+        c = rrect(S, S, 10).extrude(t)
+        for r in (14, 26, 38):
+            ring = (rrect(2 * r + 2, 2 * r + 2, r) - rrect(2 * r - 2, 2 * r - 2, r - 2)).extrude(2)
+            c = c - ring.translate((0, 0, t - 1))
+        return c
+
+    one = coaster()
+    a = Manifold.compose([one.translate((0, 0, 3 + i * t)) for i in (0, 2)])
+    b = Manifold.compose([one.translate((0, 0, 3 + i * t)) for i in (1, 3)])
+    flat = Manifold.compose([one, one.translate((S + 6, 0, 0))])
+    return [
+        ("holder", "Holder", "sample-part-coaster-holder", holder),
+        ("coasters_a", "Coasters A", "sample-part-coaster-a", a, flat),
+        ("coasters_b", "Coasters B", "sample-part-coaster-b", b, flat),
+    ]
+
+
+def key_rack():
+    # Wall plate (front faces -X) with a small top shelf and four peg-in hooks.
+    W, Hh, t = 190, 80, 8
+    plate = rrect(Hh, W, 10).extrude(t).rotate((0, -90, 0)).translate((0, 0, Hh / 2))
+    for y in (-W / 2 + 16, W / 2 - 16):
+        plate = plate - Manifold.cylinder(t + 2, 2.4, 2.4, 24).rotate((0, 90, 0)).translate((-t - 1, y, Hh - 14))
+    shelf = rrect(42, W - 10, 4).extrude(5).translate((-21 - t, 0, Hh - 5))
+    lip = rrect(4, W - 10, 1.5).extrude(10).translate((-t - 40, 0, Hh - 5))
+    shelf = shelf + lip + poly([(0, 0), (-30, 0), (0, -22)]).extrude(6).translate((0, 0, -3)).rotate((90, 0, 0)).translate((-t, 0, Hh - 5)).translate((0, W / 2 - 30, 0)) \
+        + poly([(0, 0), (-30, 0), (0, -22)]).extrude(6).translate((0, 0, -3)).rotate((90, 0, 0)).translate((-t, -W / 2 + 30, Hh - 5))
+    # Hook profile in X/Z (sticks out -X, tip turns up), extruded across Y.
+    prof = poly([(4, 0), (-30, 0), (-36, 3), (-38, 14), (-31, 14), (-30, 7), (-26, 6), (4, 6)])
+    one = prof.extrude(10).translate((0, 0, -5)).rotate((90, 0, 0))
+    ys = [-W / 2 + 40 + i * (W - 80) / 3 for i in range(4)]
+    hooks = Manifold.compose([one.translate((-t + 4, y, 18)) for y in ys])
+    hooks_flat = Manifold.compose([prof.extrude(10).translate((0, i * 22, 0)) for i in range(4)])
+    return [
+        ("wall_plate", "Wall Plate", "sample-part-rack-plate", plate),
+        ("shelf", "Shelf", "sample-part-rack-shelf", shelf),
+        ("hooks", "Hooks", "sample-part-rack-hooks", hooks, hooks_flat),
+    ]
+
+
+def bag_clip():
+    # Two arms on a hinge pin, shown slightly open; lies flat, length along -X, hinge at x=0.
+    L, Wd, t, open_deg = 120, 18, 6, 6
+    mid = 6.4                                    # width of the lower arm's centre knuckle
+
+    def knuckle(y0, y1):
+        return Manifold.cylinder(y1 - y0, t, t, 48).rotate((-90, 0, 0)).translate((0, y0, t))
+
+    bar = rrect(L, Wd, 4).extrude(t).translate((-L / 2, 0, 0))
+    outer = Manifold.compose([Manifold.cube((20, (Wd - mid) / 2 + 0.6, 30)).translate((-t - 1, y, -5))
+                              for y in (-Wd / 2 - 0.6, mid / 2)])
+    centre = Manifold.cube((20, mid + 0.6, 30)).translate((-t - 1, -mid / 2 - 0.3, -5))
+    hole = Manifold.cylinder(Wd + 4, 1.8, 1.8, 24).rotate((-90, 0, 0)).translate((0, -Wd / 2 - 2, t))
+    lower = bar - outer + knuckle(-mid / 2, mid / 2)
+    for i in range(3):  # grip ridges near the tip
+        lower = lower + rrect(2.4, Wd - 4, 1).extrude(1.2).translate((-L + 12 + i * 7, 0, t))
+    lower = lower - hole
+    upper = (bar.translate((0, 0, t)) - centre + knuckle(-Wd / 2, -mid / 2 - 0.3)
+             + knuckle(mid / 2 + 0.3, Wd / 2)) - hole
+    upper_open = upper.translate((0, 0, -t)).rotate((0, open_deg, 0)).translate((0, 0, t))
+    pin = (Manifold.cylinder(Wd + 1, 1.7, 1.7, 24)
+           + Manifold.cylinder(1.6, 3.6, 3.6, 32).translate((0, 0, Wd + 1)))
+    return [
+        ("lower_arm", "Lower Arm", "sample-part-clip-lower", lower),
+        ("upper_arm", "Upper Arm", "sample-part-clip-upper", upper_open, upper.mirror((0, 0, 1))),
+        ("hinge_pin", "Hinge Pin", "sample-part-clip-pin", pin.rotate((-90, 0, 0)).translate((0, -Wd / 2 - 0.5, t)),
+         pin),
+    ]
+
 PRODUCTS = {
-    "sample-flexi-dragon": flexi_dragon,
+    "sample-phone-stand": phone_stand,
     "sample-planter": planter,
     "sample-cable-organizer": cable_organizer,
     "sample-headphone-stand": headphone_stand,
     "sample-desk-tray": desk_tray,
     "sample-keychain": keychain,
+    "sample-pen-cup": pen_cup,
+    "sample-coaster-set": coaster_set,
+    "sample-key-rack": key_rack,
+    "sample-bag-clip": bag_clip,
 }
 
 # ---------- rendering -----------------------------------------------------------------------

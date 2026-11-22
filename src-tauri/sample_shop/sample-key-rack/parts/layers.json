@@ -1,0 +1,25 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_wall_plate",
+      "iconStem": "wall_plate",
+      "name": "Wall Plate",
+      "partId": "sample-part-rack-plate",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_shelf",
+      "iconStem": "shelf",
+      "name": "Shelf",
+      "partId": "sample-part-rack-shelf",
+      "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_hooks",
+      "iconStem": "hooks",
+      "name": "Hooks",
+      "partId": "sample-part-rack-hooks",
+      "compositeZ": 2
+    }
+  ]
+}

@@ -15,8 +15,8 @@
       "compositeZ": 1
     },
     {
-      "imageStem": "layer_ring",
-      "iconStem": "ring",
+      "imageStem": "layer_split_ring",
+      "iconStem": "split_ring",
       "name": "Split Ring",
       "partId": "sample-part-key-ring",
       "compositeZ": 2

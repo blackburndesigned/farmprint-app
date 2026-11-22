@@ -17,13 +17,17 @@ use serde::{Deserialize, Serialize};
 pub const SAMPLE_ID_PREFIX: &str = "sample-";
 
 /// Sample product ids. The desktop app ships a generic picture set for each of these.
-pub const SAMPLE_PRODUCT_IDS: [&str; 6] = [
-    "sample-flexi-dragon",
+pub const SAMPLE_PRODUCT_IDS: [&str; 10] = [
+    "sample-phone-stand",
     "sample-planter",
     "sample-cable-organizer",
     "sample-headphone-stand",
     "sample-desk-tray",
     "sample-keychain",
+    "sample-pen-cup",
+    "sample-coaster-set",
+    "sample-key-rack",
+    "sample-bag-clip",
 ];
 
 const ACTOR: &str = "FarmPrint";
@@ -114,12 +118,12 @@ const FILAMENTS: [(&str, &str, &str, &str, &str, f64, f64); 7] = [
 ];
 
 // (id, name, sku, price_cents, packed_weight_oz, box, box_cost_cents)
-const PRODUCTS: [(&str, &str, &str, i64, f64, &str, i64); 6] = [
+const PRODUCTS: [(&str, &str, &str, i64, f64, &str, i64); 10] = [
     (
-        "sample-flexi-dragon",
-        "Flexi Dragon",
-        "SAMPLE-DRAGON",
-        1800,
+        "sample-phone-stand",
+        "Phone Stand",
+        "SAMPLE-PHONE",
+        1400,
         4.0,
         "Small",
         80,
@@ -169,6 +173,42 @@ const PRODUCTS: [(&str, &str, &str, i64, f64, &str, i64); 6] = [
         "Small",
         40,
     ),
+    (
+        "sample-pen-cup",
+        "Pen Cup",
+        "SAMPLE-PENCUP",
+        1200,
+        5.0,
+        "Small",
+        80,
+    ),
+    (
+        "sample-coaster-set",
+        "Coaster Set",
+        "SAMPLE-COASTER",
+        1800,
+        8.0,
+        "Medium",
+        120,
+    ),
+    (
+        "sample-key-rack",
+        "Key Rack with Shelf",
+        "SAMPLE-KEYRACK",
+        2400,
+        9.0,
+        "Medium",
+        120,
+    ),
+    (
+        "sample-bag-clip",
+        "Bag Clip",
+        "SAMPLE-CLIP",
+        500,
+        1.0,
+        "Small",
+        40,
+    ),
 ];
 
 /// (id, product_id, name, default_filament, grams, print_minutes, sort_order, picture/mesh stem)
@@ -183,36 +223,36 @@ type SamplePart = (
     &'static str,
 );
 
-const PARTS: [SamplePart; 15] = [
+const PARTS: [SamplePart; 27] = [
     (
-        "sample-part-dragon-body",
-        "sample-flexi-dragon",
-        "Body",
-        "sample-fil-green",
-        38.0,
+        "sample-part-phone-stand",
+        "sample-phone-stand",
+        "Stand",
+        "sample-fil-white",
+        42.0,
         150,
         1,
-        "body",
+        "stand",
     ),
     (
-        "sample-part-dragon-wings",
-        "sample-flexi-dragon",
-        "Wings",
-        "sample-fil-lavender",
-        12.0,
-        45,
-        2,
-        "wings",
-    ),
-    (
-        "sample-part-dragon-head",
-        "sample-flexi-dragon",
-        "Head",
+        "sample-part-phone-lip",
+        "sample-phone-stand",
+        "Lip Pad",
         "sample-fil-orange",
-        9.0,
-        35,
+        2.0,
+        12,
+        2,
+        "lip_pad",
+    ),
+    (
+        "sample-part-phone-back",
+        "sample-phone-stand",
+        "Back Pad",
+        "sample-fil-lavender",
+        6.0,
+        25,
         3,
-        "head",
+        "back_pad",
     ),
     (
         "sample-part-planter-tray",
@@ -332,7 +372,127 @@ const PARTS: [SamplePart; 15] = [
         1.0,
         5,
         3,
-        "ring",
+        "split_ring",
+    ),
+    (
+        "sample-part-pen-foot",
+        "sample-pen-cup",
+        "Foot Ring",
+        "sample-fil-black",
+        12.0,
+        35,
+        1,
+        "foot_ring",
+    ),
+    (
+        "sample-part-pen-cup",
+        "sample-pen-cup",
+        "Cup",
+        "sample-fil-lavender",
+        48.0,
+        140,
+        2,
+        "cup",
+    ),
+    (
+        "sample-part-pen-divider",
+        "sample-pen-cup",
+        "Divider",
+        "sample-fil-white",
+        14.0,
+        45,
+        3,
+        "divider",
+    ),
+    (
+        "sample-part-coaster-holder",
+        "sample-coaster-set",
+        "Holder",
+        "sample-fil-black",
+        38.0,
+        95,
+        1,
+        "holder",
+    ),
+    (
+        "sample-part-coaster-a",
+        "sample-coaster-set",
+        "Coasters A",
+        "sample-fil-orange",
+        44.0,
+        110,
+        2,
+        "coasters_a",
+    ),
+    (
+        "sample-part-coaster-b",
+        "sample-coaster-set",
+        "Coasters B",
+        "sample-fil-white",
+        44.0,
+        110,
+        3,
+        "coasters_b",
+    ),
+    (
+        "sample-part-rack-plate",
+        "sample-key-rack",
+        "Wall Plate",
+        "sample-fil-white",
+        60.0,
+        150,
+        1,
+        "wall_plate",
+    ),
+    (
+        "sample-part-rack-shelf",
+        "sample-key-rack",
+        "Shelf",
+        "sample-fil-blue",
+        34.0,
+        85,
+        2,
+        "shelf",
+    ),
+    (
+        "sample-part-rack-hooks",
+        "sample-key-rack",
+        "Hooks",
+        "sample-fil-black",
+        10.0,
+        30,
+        3,
+        "hooks",
+    ),
+    (
+        "sample-part-clip-lower",
+        "sample-bag-clip",
+        "Lower Arm",
+        "sample-fil-blue",
+        8.0,
+        25,
+        1,
+        "lower_arm",
+    ),
+    (
+        "sample-part-clip-upper",
+        "sample-bag-clip",
+        "Upper Arm",
+        "sample-fil-orange",
+        8.0,
+        25,
+        2,
+        "upper_arm",
+    ),
+    (
+        "sample-part-clip-pin",
+        "sample-bag-clip",
+        "Hinge Pin",
+        "sample-fil-white",
+        1.0,
+        6,
+        3,
+        "hinge_pin",
     ),
 ];
 
@@ -414,7 +574,7 @@ const ORDERS: &[SampleOrder] = &[
         notes: "",
         tracking: None,
         lines: &[
-            line("sample-flexi-dragon", Goal::Queued),
+            line("sample-phone-stand", Goal::Queued),
             SampleLine {
                 product: "sample-keychain",
                 parts: &[("Tag", Some("sample-fil-green"), Goal::Queued)],
@@ -500,11 +660,10 @@ const ORDERS: &[SampleOrder] = &[
         notes: "",
         tracking: None,
         lines: &[SampleLine {
-            product: "sample-flexi-dragon",
+            product: "sample-phone-stand",
             parts: &[
-                ("Body", Some("sample-fil-lavender"), Goal::PostProcessing),
-                ("Wings", Some("sample-fil-blue"), Goal::PostProcessing),
-                ("Head", Some("sample-fil-lavender"), Goal::PostProcessing),
+                ("Stand", Some("sample-fil-black"), Goal::PostProcessing),
+                ("Lip Pad", Some("sample-fil-red"), Goal::PostProcessing),
             ],
             rest: Goal::PostProcessing,
         }],
@@ -547,6 +706,106 @@ const ORDERS: &[SampleOrder] = &[
         lines: &[
             line("sample-headphone-stand", Goal::Shipped),
             line("sample-keychain", Goal::Shipped),
+        ],
+    },
+    SampleOrder {
+        n: 1009,
+        customer: "Hannah L.",
+        days_ago: 0,
+        rush: false,
+        hold: false,
+        notes: "",
+        tracking: None,
+        lines: &[
+            SampleLine {
+                product: "sample-pen-cup",
+                parts: &[("Cup", Some("sample-fil-green"), Goal::Queued)],
+                rest: Goal::Queued,
+            },
+            line("sample-bag-clip", Goal::Queued),
+            SampleLine {
+                product: "sample-bag-clip",
+                parts: &[("Upper Arm", Some("sample-fil-red"), Goal::Queued)],
+                rest: Goal::Queued,
+            },
+        ],
+    },
+    SampleOrder {
+        n: 1010,
+        customer: "Theo N.",
+        days_ago: 1,
+        rush: false,
+        hold: false,
+        notes: "",
+        tracking: None,
+        lines: &[SampleLine {
+            product: "sample-coaster-set",
+            parts: &[("Coasters A", None, Goal::Printing("sample-prn-3"))],
+            rest: Goal::Staged("sample-prn-1"),
+        }],
+    },
+    SampleOrder {
+        n: 1011,
+        customer: "Grace P.",
+        days_ago: 2,
+        rush: true,
+        hold: false,
+        notes: "Gift, please leave the price off the packing slip.",
+        tracking: None,
+        lines: &[SampleLine {
+            product: "sample-key-rack",
+            parts: &[("Shelf", None, Goal::Printing("sample-prn-3"))],
+            rest: Goal::Printed,
+        }],
+    },
+    SampleOrder {
+        n: 1012,
+        customer: "Luis F.",
+        days_ago: 3,
+        rush: false,
+        hold: false,
+        notes: "",
+        tracking: None,
+        lines: &[
+            line("sample-pen-cup", Goal::PostProcessing),
+            SampleLine {
+                product: "sample-coaster-set",
+                parts: &[("Coasters A", Some("sample-fil-blue"), Goal::PostProcessing)],
+                rest: Goal::PostProcessing,
+            },
+        ],
+    },
+    SampleOrder {
+        n: 1013,
+        customer: "Nora J.",
+        days_ago: 6,
+        rush: false,
+        hold: false,
+        notes: "",
+        tracking: None,
+        lines: &[
+            SampleLine {
+                product: "sample-key-rack",
+                parts: &[
+                    ("Wall Plate", Some("sample-fil-black"), Goal::Ready),
+                    ("Hooks", Some("sample-fil-orange"), Goal::Ready),
+                ],
+                rest: Goal::Ready,
+            },
+            line("sample-bag-clip", Goal::Ready),
+        ],
+    },
+    SampleOrder {
+        n: 1014,
+        customer: "Ravi D.",
+        days_ago: 10,
+        rush: false,
+        hold: false,
+        notes: "",
+        tracking: Some("SAMPLE-TRACKING-1014"),
+        lines: &[
+            line("sample-coaster-set", Goal::Shipped),
+            line("sample-pen-cup", Goal::Shipped),
         ],
     },
 ];
@@ -892,6 +1151,7 @@ mod tests {
         let mut l = empty();
         let snap = l.load_sample_shop().unwrap();
         assert_eq!(snap.orders.len(), ORDERS.len());
+        assert_eq!(ORDERS.len(), 14);
         assert_eq!(snap.products.len(), PRODUCTS.len());
         assert_eq!(snap.printers.len(), 4);
         let units: Vec<_> = snap
@@ -959,14 +1219,50 @@ mod tests {
         assert_eq!(
             names,
             [
+                "Bag Clip",
                 "Cable Organizer",
+                "Coaster Set",
                 "Desk Tray",
-                "Flexi Dragon",
                 "Headphone Stand",
+                "Key Rack with Shelf",
                 "Mountain Keychain",
+                "Pen Cup",
+                "Phone Stand",
                 "Planter with Drip Tray"
             ]
         );
+        // Part overrides in the sample orders name real parts, and every product is ordered.
+        for o in ORDERS {
+            for l in o.lines {
+                for (name, ..) in l.parts {
+                    assert!(
+                        PARTS.iter().any(|p| p.1 == l.product && p.2 == *name),
+                        "order {} names unknown part {name} of {}",
+                        o.n,
+                        l.product
+                    );
+                }
+            }
+        }
+        for (id, ..) in PRODUCTS {
+            assert!(
+                ORDERS
+                    .iter()
+                    .any(|o| o.lines.iter().any(|l| l.product == id)),
+                "{id} is in no sample order"
+            );
+        }
+        assert_eq!(SAMPLE_PRODUCT_IDS.len(), PRODUCTS.len());
+        // Each picture stem is the part's name as a file stem, so a lookup by part name
+        // finds the same picture as the mesh file.
+        for (_, _, name, _, _, _, _, stem) in PARTS {
+            let from_name: String = name
+                .to_ascii_lowercase()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            assert_eq!(stem, from_name, "{name}");
+        }
         // Every part points at its shipped picture (and the STL beside it) so Print! works.
         for p in snap.products.iter().flat_map(|p| &p.parts) {
             assert!(p.mesh_file.ends_with(".png"), "{}", p.name);

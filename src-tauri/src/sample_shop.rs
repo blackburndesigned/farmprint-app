@@ -9,6 +9,56 @@ use std::path::Path;
 /// (product id, file under `<catalog>/<product id>/parts/`, bytes)
 const FILES: &[(&str, &str, &[u8])] = &[
     (
+        "sample-bag-clip",
+        "hinge_pin.png",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/hinge_pin.png"),
+    ),
+    (
+        "sample-bag-clip",
+        "hinge_pin.stl",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/hinge_pin.stl"),
+    ),
+    (
+        "sample-bag-clip",
+        "layer_hinge_pin.png",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/layer_hinge_pin.png"),
+    ),
+    (
+        "sample-bag-clip",
+        "layer_lower_arm.png",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/layer_lower_arm.png"),
+    ),
+    (
+        "sample-bag-clip",
+        "layer_upper_arm.png",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/layer_upper_arm.png"),
+    ),
+    (
+        "sample-bag-clip",
+        "layers.json",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/layers.json"),
+    ),
+    (
+        "sample-bag-clip",
+        "lower_arm.png",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/lower_arm.png"),
+    ),
+    (
+        "sample-bag-clip",
+        "lower_arm.stl",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/lower_arm.stl"),
+    ),
+    (
+        "sample-bag-clip",
+        "upper_arm.png",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/upper_arm.png"),
+    ),
+    (
+        "sample-bag-clip",
+        "upper_arm.stl",
+        include_bytes!("../sample_shop/sample-bag-clip/parts/upper_arm.stl"),
+    ),
+    (
         "sample-cable-organizer",
         "base.png",
         include_bytes!("../sample_shop/sample-cable-organizer/parts/base.png"),
@@ -44,6 +94,56 @@ const FILES: &[(&str, &str, &[u8])] = &[
         include_bytes!("../sample_shop/sample-cable-organizer/parts/layers.json"),
     ),
     (
+        "sample-coaster-set",
+        "coasters_a.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_a.png"),
+    ),
+    (
+        "sample-coaster-set",
+        "coasters_a.stl",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_a.stl"),
+    ),
+    (
+        "sample-coaster-set",
+        "coasters_b.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_b.png"),
+    ),
+    (
+        "sample-coaster-set",
+        "coasters_b.stl",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/coasters_b.stl"),
+    ),
+    (
+        "sample-coaster-set",
+        "holder.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/holder.png"),
+    ),
+    (
+        "sample-coaster-set",
+        "holder.stl",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/holder.stl"),
+    ),
+    (
+        "sample-coaster-set",
+        "layer_coasters_a.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_coasters_a.png"),
+    ),
+    (
+        "sample-coaster-set",
+        "layer_coasters_b.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_coasters_b.png"),
+    ),
+    (
+        "sample-coaster-set",
+        "layer_holder.png",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/layer_holder.png"),
+    ),
+    (
+        "sample-coaster-set",
+        "layers.json",
+        include_bytes!("../sample_shop/sample-coaster-set/parts/layers.json"),
+    ),
+    (
         "sample-desk-tray",
         "dividers.png",
         include_bytes!("../sample_shop/sample-desk-tray/parts/dividers.png"),
@@ -77,56 +177,6 @@ const FILES: &[(&str, &str, &[u8])] = &[
         "sample-desk-tray",
         "tray.stl",
         include_bytes!("../sample_shop/sample-desk-tray/parts/tray.stl"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "body.png",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/body.png"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "body.stl",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/body.stl"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "head.png",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/head.png"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "head.stl",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/head.stl"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "layer_body.png",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/layer_body.png"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "layer_head.png",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/layer_head.png"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "layer_wings.png",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/layer_wings.png"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "layers.json",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/layers.json"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "wings.png",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/wings.png"),
-    ),
-    (
-        "sample-flexi-dragon",
-        "wings.stl",
-        include_bytes!("../sample_shop/sample-flexi-dragon/parts/wings.stl"),
     ),
     (
         "sample-headphone-stand",
@@ -179,6 +229,56 @@ const FILES: &[(&str, &str, &[u8])] = &[
         include_bytes!("../sample_shop/sample-headphone-stand/parts/post.stl"),
     ),
     (
+        "sample-key-rack",
+        "hooks.png",
+        include_bytes!("../sample_shop/sample-key-rack/parts/hooks.png"),
+    ),
+    (
+        "sample-key-rack",
+        "hooks.stl",
+        include_bytes!("../sample_shop/sample-key-rack/parts/hooks.stl"),
+    ),
+    (
+        "sample-key-rack",
+        "layer_hooks.png",
+        include_bytes!("../sample_shop/sample-key-rack/parts/layer_hooks.png"),
+    ),
+    (
+        "sample-key-rack",
+        "layer_shelf.png",
+        include_bytes!("../sample_shop/sample-key-rack/parts/layer_shelf.png"),
+    ),
+    (
+        "sample-key-rack",
+        "layer_wall_plate.png",
+        include_bytes!("../sample_shop/sample-key-rack/parts/layer_wall_plate.png"),
+    ),
+    (
+        "sample-key-rack",
+        "layers.json",
+        include_bytes!("../sample_shop/sample-key-rack/parts/layers.json"),
+    ),
+    (
+        "sample-key-rack",
+        "shelf.png",
+        include_bytes!("../sample_shop/sample-key-rack/parts/shelf.png"),
+    ),
+    (
+        "sample-key-rack",
+        "shelf.stl",
+        include_bytes!("../sample_shop/sample-key-rack/parts/shelf.stl"),
+    ),
+    (
+        "sample-key-rack",
+        "wall_plate.png",
+        include_bytes!("../sample_shop/sample-key-rack/parts/wall_plate.png"),
+    ),
+    (
+        "sample-key-rack",
+        "wall_plate.stl",
+        include_bytes!("../sample_shop/sample-key-rack/parts/wall_plate.stl"),
+    ),
+    (
         "sample-keychain",
         "inlay.png",
         include_bytes!("../sample_shop/sample-keychain/parts/inlay.png"),
@@ -195,8 +295,8 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ),
     (
         "sample-keychain",
-        "layer_ring.png",
-        include_bytes!("../sample_shop/sample-keychain/parts/layer_ring.png"),
+        "layer_split_ring.png",
+        include_bytes!("../sample_shop/sample-keychain/parts/layer_split_ring.png"),
     ),
     (
         "sample-keychain",
@@ -210,13 +310,13 @@ const FILES: &[(&str, &str, &[u8])] = &[
     ),
     (
         "sample-keychain",
-        "ring.png",
-        include_bytes!("../sample_shop/sample-keychain/parts/ring.png"),
+        "split_ring.png",
+        include_bytes!("../sample_shop/sample-keychain/parts/split_ring.png"),
     ),
     (
         "sample-keychain",
-        "ring.stl",
-        include_bytes!("../sample_shop/sample-keychain/parts/ring.stl"),
+        "split_ring.stl",
+        include_bytes!("../sample_shop/sample-keychain/parts/split_ring.stl"),
     ),
     (
         "sample-keychain",
@@ -227,6 +327,106 @@ const FILES: &[(&str, &str, &[u8])] = &[
         "sample-keychain",
         "tag.stl",
         include_bytes!("../sample_shop/sample-keychain/parts/tag.stl"),
+    ),
+    (
+        "sample-pen-cup",
+        "cup.png",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/cup.png"),
+    ),
+    (
+        "sample-pen-cup",
+        "cup.stl",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/cup.stl"),
+    ),
+    (
+        "sample-pen-cup",
+        "divider.png",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/divider.png"),
+    ),
+    (
+        "sample-pen-cup",
+        "divider.stl",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/divider.stl"),
+    ),
+    (
+        "sample-pen-cup",
+        "foot_ring.png",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/foot_ring.png"),
+    ),
+    (
+        "sample-pen-cup",
+        "foot_ring.stl",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/foot_ring.stl"),
+    ),
+    (
+        "sample-pen-cup",
+        "layer_cup.png",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/layer_cup.png"),
+    ),
+    (
+        "sample-pen-cup",
+        "layer_divider.png",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/layer_divider.png"),
+    ),
+    (
+        "sample-pen-cup",
+        "layer_foot_ring.png",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/layer_foot_ring.png"),
+    ),
+    (
+        "sample-pen-cup",
+        "layers.json",
+        include_bytes!("../sample_shop/sample-pen-cup/parts/layers.json"),
+    ),
+    (
+        "sample-phone-stand",
+        "back_pad.png",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/back_pad.png"),
+    ),
+    (
+        "sample-phone-stand",
+        "back_pad.stl",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/back_pad.stl"),
+    ),
+    (
+        "sample-phone-stand",
+        "layer_back_pad.png",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/layer_back_pad.png"),
+    ),
+    (
+        "sample-phone-stand",
+        "layer_lip_pad.png",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/layer_lip_pad.png"),
+    ),
+    (
+        "sample-phone-stand",
+        "layer_stand.png",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/layer_stand.png"),
+    ),
+    (
+        "sample-phone-stand",
+        "layers.json",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/layers.json"),
+    ),
+    (
+        "sample-phone-stand",
+        "lip_pad.png",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/lip_pad.png"),
+    ),
+    (
+        "sample-phone-stand",
+        "lip_pad.stl",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/lip_pad.stl"),
+    ),
+    (
+        "sample-phone-stand",
+        "stand.png",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/stand.png"),
+    ),
+    (
+        "sample-phone-stand",
+        "stand.stl",
+        include_bytes!("../sample_shop/sample-phone-stand/parts/stand.stl"),
     ),
     (
         "sample-planter",

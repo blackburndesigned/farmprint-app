@@ -1,0 +1,25 @@
+{
+  "layers": [
+    {
+      "imageStem": "layer_foot_ring",
+      "iconStem": "foot_ring",
+      "name": "Foot Ring",
+      "partId": "sample-part-pen-foot",
+      "compositeZ": 0
+    },
+    {
+      "imageStem": "layer_cup",
+      "iconStem": "cup",
+      "name": "Cup",
+      "partId": "sample-part-pen-cup",
+      "compositeZ": 1
+    },
+    {
+      "imageStem": "layer_divider",
+      "iconStem": "divider",
+      "name": "Divider",
+      "partId": "sample-part-pen-divider",
+      "compositeZ": 2
+    }
+  ]
+}
