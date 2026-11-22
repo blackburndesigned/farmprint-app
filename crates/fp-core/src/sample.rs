@@ -1336,4 +1336,91 @@ mod tests {
         assert_eq!(snap.products.len(), 1);
         assert!(!snap.orders[0].lines[0].units.is_empty());
     }
+
+    #[test]
+    fn multi_product_units_carry_their_own_product_name() {
+        let mut l = empty();
+        let snap = l.load_sample_shop().unwrap();
+        let order = snap
+            .orders
+            .iter()
+            .find(|o| o.order_code == "SAMPLE-1009")
+            .expect("sample order 1009");
+        assert_eq!(order.customer_name, "Hannah L.");
+        let names: Vec<&str> = order
+            .lines
+            .iter()
+            .map(|ln| ln.product_name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"Pen Cup") && names.contains(&"Bag Clip"),
+            "1009 should have Pen Cup and Bag Clip, got {names:?}"
+        );
+        for line in &order.lines {
+            for unit in &line.units {
+                assert_eq!(unit.line_id, line.id, "{}", unit.part_name);
+                assert_eq!(unit.product_id, line.product_id, "{}", unit.part_name);
+                assert_eq!(unit.product_name, line.product_name, "{}", unit.part_name);
+            }
+        }
+        let lower = order
+            .lines
+            .iter()
+            .flat_map(|ln| ln.units.iter())
+            .find(|u| u.part_name == "Lower Arm")
+            .expect("Lower Arm on 1009");
+        assert_eq!(lower.product_name, "Bag Clip");
+        assert_ne!(lower.product_name, "Pen Cup");
+
+        // Same rule for a shop-created two-product order, not just the sample seed.
+        let created = l
+            .create_order(crate::CreateOrderInput {
+                customer_name: "Two Product".into(),
+                customer_email: "two@example.com".into(),
+                product_id: "sample-pen-cup".into(),
+                quantity: 1,
+                is_rush: false,
+                custom_text: None,
+            })
+            .unwrap();
+        let oid = created
+            .orders
+            .iter()
+            .find(|o| o.customer_name == "Two Product")
+            .unwrap()
+            .id
+            .clone();
+        let snap = l
+            .add_order_line(&oid, "sample-bag-clip", 1, None, None)
+            .unwrap();
+        let order = snap.orders.iter().find(|o| o.id == oid).unwrap();
+        assert_eq!(order.lines.len(), 2);
+        for line in &order.lines {
+            assert!(!line.units.is_empty(), "{}", line.product_name);
+            for unit in &line.units {
+                assert_eq!(unit.line_id, line.id, "{}", unit.part_name);
+                assert_eq!(unit.product_id, line.product_id, "{}", unit.part_name);
+                assert_eq!(unit.product_name, line.product_name, "{}", unit.part_name);
+            }
+        }
+        let clip = order
+            .lines
+            .iter()
+            .find(|ln| ln.product_id == "sample-bag-clip")
+            .unwrap();
+        assert!(clip.units.iter().any(|u| u.part_name == "Lower Arm"));
+        assert!(clip
+            .units
+            .iter()
+            .all(|u| u.product_name == "Bag Clip" && u.product_id == "sample-bag-clip"));
+        let cup = order
+            .lines
+            .iter()
+            .find(|ln| ln.product_id == "sample-pen-cup")
+            .unwrap();
+        assert!(cup
+            .units
+            .iter()
+            .all(|u| u.product_name == "Pen Cup" && u.product_id == "sample-pen-cup"));
+    }
 }

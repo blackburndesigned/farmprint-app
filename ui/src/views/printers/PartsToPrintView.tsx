@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "../../tauriInvoke";
-import { Order, OverstockItem, PartUnit, Product, ShopSnapshot } from "../../types";
+import { Order, OrderLine, OverstockItem, PartUnit, Product, ShopSnapshot } from "../../types";
 import { ProductCompositeThumbnail3D } from "../../components/PartThumbnail3D";
+import { OrderLinePicture } from "../../orderLineThumbs";
+import { orderProductHeading } from "../../orderLabels";
 import { StatusLegendHeader } from "../OrdersAndonViews";
 import { csvText, notifyBanner, notifyError, saveTextFile } from "../../uiFeedback";
 import { PartTile64, type PrintersQueueCommonProps, type SuggestedPrintGroup, isPrinterReadyFirst, prefersLightOnHex } from "./printersShared";
@@ -47,6 +49,86 @@ const GroupCheck: React.FC<{ sel: Selection; ids: string[]; label: string; onTog
       onClick={(e) => e.stopPropagation()}
       style={{ width: 16, height: 16, margin: 0, flexShrink: 0, cursor: "pointer", accentColor: "#0a84ff" }}
     />
+  );
+};
+
+
+/** Composite for a Parts to Print order card: one product, or a grid when the order has several. */
+const OrderGroupThumb: React.FC<{
+  ord: Order;
+  snapshot: ShopSnapshot;
+  productById: Map<string, Product>;
+  allOrdUnits: PartUnit[];
+}> = ({ ord, snapshot, productById, allOrdUnits }) => {
+  const thumbsFor = (line: OrderLine) => {
+    const prod = productById.get(line.product_id) || snapshot.products.find((p) => p.id === line.product_id);
+    return (
+      prod?.parts.map((pt) => ({
+        partName: pt.name,
+        colorHex:
+          line.units.find((u) => u.part_id === pt.id || u.part_name === pt.name)?.filament_hex ||
+          snapshot.filaments.find((f) => f.id === pt.default_filament_id)?.hex ||
+          "#1B1D21",
+        visible: true,
+      })) ||
+      (line.units.length > 0 ? line.units : allOrdUnits.filter((u) => u.line_id === line.id)).map((u) => ({
+        partName: u.part_name,
+        colorHex: u.filament_hex,
+        visible: true,
+      }))
+    );
+  };
+  if (ord.lines.length <= 1) {
+    const line = ord.lines[0];
+    return (
+      <ProductCompositeThumbnail3D
+        productName={line?.product_name || ord.customer_name}
+        parts={line ? thumbsFor(line) : allOrdUnits.map((u) => ({ partName: u.part_name, colorHex: u.filament_hex, visible: true }))}
+        size={84}
+        inscriptionText={line?.custom_text}
+      />
+    );
+  }
+  const cell = ord.lines.length === 2 ? 70 : 38;
+  return (
+    <div
+      style={{
+        width: 84,
+        height: 84,
+        borderRadius: 10,
+        padding: 4,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.10)",
+        boxSizing: "border-box",
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gridTemplateRows: ord.lines.length === 2 ? "minmax(0, 1fr)" : "repeat(2, minmax(0, 1fr))",
+        gap: 4,
+        flexShrink: 0,
+      }}
+    >
+      {(ord.lines.length === 2 ? ord.lines : ord.lines.slice(0, 4)).map((line, slot) => {
+        const extra = Math.max(0, ord.lines.length - 4);
+        const fallback = (
+          <ProductCompositeThumbnail3D
+            productName={line.product_name}
+            parts={thumbsFor(line)}
+            size={cell}
+            inscriptionText={line.custom_text}
+          />
+        );
+        return (
+          <div key={line.id} style={{ position: "relative", borderRadius: 6, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <OrderLinePicture order={ord} line={line} size={cell} fallback={fallback} />
+            {slot === 3 && extra > 0 ? (
+              <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.58)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#fff" }}>
+                +{extra}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
   );
 };
 
@@ -565,24 +647,10 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
         {sortMode === "color"
           ? colorGroups.map((grp) => renderColorCard(grp, "Parts to Print"))
           : orderGroups.map(({ ord, allOrdUnits, ordUnits }) => {
-                const line = ord.lines[0];
-                const prod = snapshot.products.find((p) => p.id === line?.product_id);
-                const compositeParts =
-                  prod?.parts.map((pt) => ({
-                    partName: pt.name,
-                    colorHex:
-                      line?.units.find(
-                        (u) => u.part_id === pt.id || u.part_name === pt.name
-                      )?.filament_hex ||
-                      snapshot?.filaments.find((f) => f.id === pt.default_filament_id)?.hex ||
-                      "#1B1D21",
-                    visible: true,
-                  })) ||
-                  allOrdUnits.map((u) => ({
-                    partName: u.part_name,
-                    colorHex: u.filament_hex,
-                    visible: true,
-                  }));
+                const heading = orderProductHeading(ord.lines);
+                const inscriptions = Array.from(
+                  new Set(ord.lines.map((l) => (l.custom_text || "").trim()).filter(Boolean))
+                );
                 return (
                   <div
                     key={ord.id}
@@ -603,11 +671,11 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                         label={`Select all ${ordUnits.length} waiting parts for ${ord.customer_name}`}
                         onToggle={groupToggle(ordUnits.map((u) => u.id))}
                       />
-                      <ProductCompositeThumbnail3D
-                        productName={line?.product_name || ord.customer_name}
-                        parts={compositeParts}
-                        size={84}
-                        inscriptionText={line?.custom_text}
+                      <OrderGroupThumb
+                        ord={ord}
+                        snapshot={snapshot}
+                        productById={productById}
+                        allOrdUnits={allOrdUnits}
                       />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div
@@ -641,11 +709,11 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                             marginTop: 2,
                           }}
                         >
-                          {line?.product_name}{" "}
-                          {line?.quantity && line.quantity > 1 ? `×${line.quantity}` : ""}
+                          {heading}
                         </div>
-                        {line?.custom_text && (
+                        {inscriptions.map((text) => (
                           <div
+                            key={text}
                             style={{
                               fontSize: 11,
                               color: "#38bdf8",
@@ -653,9 +721,9 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
                               marginTop: 2,
                             }}
                           >
-                            “{line.custom_text}”
+                            “{text}”
                           </div>
-                        )}
+                        ))}
                         <div
                           style={{
                             display: "flex",
