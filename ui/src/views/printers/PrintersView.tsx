@@ -285,11 +285,15 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                       </div>
                     )}
                   </div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginTop: 12 }}>
-                    <span style={{ fontSize: 40, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: isPrinting ? "#64d2ff" : "rgba(235,235,245,0.4)" }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 14, marginTop: 12 }}>
+                    <span style={{ fontSize: 40, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: isPrinting ? "#64d2ff" : "rgba(235,235,245,0.4)", flexShrink: 0 }}>
                       {laneUnits.length > 0 ? `~${Math.max(1, Math.round(totalMins / 60))}h ${totalMins % 60}m` : "0m"}
                     </span>
-                    {!isUnassignedLane(printer) && <FeederBoxes feeders={feedersOf(printer)} variant="wall" />}
+                    {!isUnassignedLane(printer) && (
+                      <div style={{ flex: "1 1 240px", minWidth: 240 }}>
+                        <FeederBoxes feeders={feedersOf(printer)} variant="wall" />
+                      </div>
+                    )}
                   </div>
                 </div>
                 {laneUnits.length > 0 && (

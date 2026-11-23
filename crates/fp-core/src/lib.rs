@@ -411,7 +411,7 @@ impl ShopLedger {
     pub fn printer_loaded_slots(&self, printer_id: &str) -> CoreResult<Vec<PrinterSlot>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.slot_index, s.filament_id, COALESCE(f.name, ''), COALESCE(f.hex, ''),
-                    COALESCE(f.material, '')
+                    COALESCE(f.material, ''), COALESCE(f.brand, '')
              FROM printer_slots s LEFT JOIN filaments f ON f.id = s.filament_id
              WHERE s.printer_id = ?1 ORDER BY s.slot_index",
         )?;
@@ -423,6 +423,7 @@ impl ShopLedger {
                     filament_name: r.get(2)?,
                     filament_hex: r.get(3)?,
                     material: r.get(4)?,
+                    brand: r.get(5)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -2244,6 +2245,7 @@ impl ShopLedger {
                                 .map(|f| f.hex.clone())
                                 .unwrap_or_else(|| "#888888".to_string()),
                             material: fil.map(|f| f.material.clone()).unwrap_or_default(),
+                            brand: fil.map(|f| f.brand.clone()).unwrap_or_default(),
                         }
                     })
                     .collect::<Vec<_>>();
@@ -4304,6 +4306,7 @@ mod tests {
             ]
         );
         assert_eq!(slots[0].material, fils[0].material);
+        assert_eq!(slots[0].brand, fils[0].brand);
         assert!(ledger.printer_loaded_slots("prn-nope").unwrap().is_empty());
     }
 

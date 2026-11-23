@@ -25,3 +25,12 @@ export function suggestionValues(values: Array<string | null | undefined>): stri
   }
   return out;
 }
+
+/** Short material/type label for tight UI (feeder dots). Blank stays blank. */
+export function shortTypeLabel(material?: string | null, maxLen = 6): string {
+  const t = (material || "").trim();
+  if (!t) return "";
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
