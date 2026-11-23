@@ -3,6 +3,7 @@ import {
   biggerThanBed,
   clearanceFieldsOf,
   printBlockReason,
+  fitKeyOf,
   reachFromPartArea,
   DEFAULT_SETTINGS,
   plateEntryOf,
@@ -166,6 +167,19 @@ check(!h.canRedo, "a new change clears redo");
   check(printBlockReason({ ...ok, unreachable: ["u", "v"] })?.startsWith("No nozzle area fits 2 parts") === true, "reason counts unreachable parts");
   check(printBlockReason({ off_plate: ["a"], too_tall: [] })?.includes("doesn't fit this printer") === true, "too big still blocks Print!");
   check(printBlockReason({ off_plate: [], too_tall: ["a"], unreachable: ["u"] })?.startsWith("No nozzle area") === true, "unreachable reason wins");
+}
+
+// The printer picker refits when a Settings edit changes anything layout reads.
+{
+  const base = { id: "p", bed_x_mm: null, bed_y_mm: null, bed_z_mm: null, print_areas: [], feeders: [], loaded_slots: [] };
+  const k = fitKeyOf(base);
+  check(fitKeyOf({ ...base }) === k, "same printer, same fit key");
+  check(fitKeyOf({ ...base, bed_x_mm: 325, bed_y_mm: 320 }) !== k, "bed size edit refits");
+  check(fitKeyOf({ ...base, bed_z_mm: 325 }) !== k, "build height edit refits");
+  check(fitKeyOf({ ...base, print_areas: [{ name: "Left nozzle" }] }) !== k, "print area edit refits");
+  check(fitKeyOf({ ...base, extruder_clearance_radius: 40 }) !== k, "clearance edit refits");
+  check(fitKeyOf({ ...base, feeders: [{ first_slot: 1, slot_count: 4, nozzle: "left" }] }) !== k, "feeder nozzle edit refits");
+  check(fitKeyOf({ ...base, loaded_slots: [{ slot_index: 1, filament_id: "f" }] }) !== k, "loaded filament edit refits");
 }
 
 done();

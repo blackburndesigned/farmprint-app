@@ -19,12 +19,49 @@ fn cache() -> &'static Mutex<HashMap<String, Arc<TriangleMesh>>> {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The bed used for layout: the printer's size, or the 220 mm square when it has none.
+/// A printer's build volume as layout uses it, read from the ledger on every call (never
+/// a cached snapshot): the bed width/depth/height set in Settings; when width and depth
+/// aren't set but print areas are, the bed the areas span (their far edges from the
+/// front-left corner), and when no height is set, the tallest area. None = nothing set
+/// (layout then uses the 220 mm default).
+pub fn effective_build_volume(
+    ledger: &fp_core::ShopLedger,
+    printer_id: &str,
+) -> Result<(Option<f64>, Option<f64>, Option<f64>), String> {
+    let (x, y, z) = ledger.printer_build_volume_mm(printer_id).map_err(|e| e.to_string())?;
+    let areas = ledger.printer_print_areas(printer_id).map_err(|e| e.to_string())?;
+    Ok(build_volume_with_areas((x, y, z), &areas))
+}
+
+/// [`effective_build_volume`] from the stored values and the areas.
+pub fn build_volume_with_areas(
+    (x, y, z): (Option<f64>, Option<f64>, Option<f64>),
+    areas: &[fp_core::PrintArea],
+) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let ok = |v: Option<f64>| v.filter(|n| n.is_finite() && *n > 0.0);
+    let usable: Vec<&fp_core::PrintArea> = areas
+        .iter()
+        .filter(|a| a.width_mm > 0.0 && a.depth_mm > 0.0 && a.x_mm.is_finite() && a.y_mm.is_finite())
+        .collect();
+    let span = |f: &dyn Fn(&fp_core::PrintArea) -> f64| usable.iter().map(|a| f(a)).fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))));
+    let (x, y) = match (ok(x), ok(y)) {
+        (Some(w), Some(d)) => (Some(w), Some(d)),
+        _ => match (span(&|a| a.x_mm + a.width_mm), span(&|a| a.y_mm + a.depth_mm)) {
+            (Some(w), Some(d)) if w > 0.0 && d > 0.0 => (Some(w), Some(d)),
+            _ => (ok(x), ok(y)),
+        },
+    };
+    let z = ok(z).or_else(|| ok(span(&|a| a.height_mm)));
+    (x, y, z)
+}
+
+/// The bed used for layout: the printer's size (see [`effective_build_volume`]), or the
+/// 220 mm square when nothing is set.
 pub fn bed_for(state: &AppState, printer_id: Option<&str>) -> Result<(BedSize, bool), String> {
     let (x, y, z) = match printer_id.filter(|p| !p.is_empty()) {
         Some(pid) => {
             let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
-            ledger.printer_build_volume_mm(pid).map_err(|e| e.to_string())?
+            effective_build_volume(&ledger, pid)?
         }
         None => (None, None, None),
     };
@@ -994,5 +1031,35 @@ mod tests {
         let s = with_printer_clearance(&ledger, &pid, base);
         assert_eq!((s.clearance_radius_mm, s.clearance_height_mm), (40.0, 25.0));
         assert_eq!((s.clearance_dist_to_rod_mm, s.clearance_height_to_lid_mm), (Some(60.0), Some(120.0)));
+    }
+
+    #[test]
+    fn build_volume_is_read_live_and_falls_back_to_the_print_areas() {
+        let mut ledger = fp_core::ShopLedger::open_in_memory().unwrap();
+        let pid = ledger.snapshot().unwrap().printers[0].id.clone();
+        ledger.set_printer_bed_size(&pid, None, None, None).unwrap();
+        // Nothing set: no size (layout uses 220).
+        assert_eq!(effective_build_volume(&ledger, &pid).unwrap(), (None, None, None));
+        // Print areas only (test data): the bed they span and the tallest area.
+        let areas: Vec<fp_core::PrintAreaInput> = serde_json::from_value(json!([
+            {"name": "Left nozzle", "nozzle": "left", "width_mm": 325.0, "depth_mm": 320.0, "height_mm": 320.0, "x_mm": 0.0, "y_mm": 0.0},
+            {"name": "Right nozzle", "nozzle": "right", "width_mm": 305.0, "depth_mm": 320.0, "height_mm": 325.0, "x_mm": 20.0, "y_mm": 0.0}
+        ]))
+        .unwrap();
+        ledger.set_printer_print_areas(&pid, areas).unwrap();
+        assert_eq!(effective_build_volume(&ledger, &pid).unwrap(), (Some(325.0), Some(320.0), Some(325.0)));
+        // An edited bed wins at once (no cached snapshot), height too.
+        ledger.set_printer_bed_size(&pid, Some(350.0), Some(330.0), Some(300.0)).unwrap();
+        assert_eq!(effective_build_volume(&ledger, &pid).unwrap(), (Some(350.0), Some(330.0), Some(300.0)));
+        // Width/depth set, height empty: the tallest area gives the height.
+        ledger.set_printer_bed_size(&pid, Some(350.0), Some(330.0), None).unwrap();
+        assert_eq!(effective_build_volume(&ledger, &pid).unwrap(), (Some(350.0), Some(330.0), Some(325.0)));
+    }
+
+    #[test]
+    fn build_volume_without_areas_is_the_stored_bed() {
+        assert_eq!(build_volume_with_areas((Some(256.0), Some(256.0), None), &[]), (Some(256.0), Some(256.0), None));
+        assert_eq!(build_volume_with_areas((None, None, Some(250.0)), &[]), (None, None, Some(250.0)));
+        assert_eq!(build_volume_with_areas((Some(0.0), Some(f64::NAN), None), &[]), (None, None, None));
     }
 }

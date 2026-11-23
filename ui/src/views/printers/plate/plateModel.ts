@@ -502,6 +502,36 @@ export function layoutFor(parts: PlatePart[], order: string[][]): PrintLayout {
   };
 }
 
+/** Everything about a printer the automatic layout reads, as a cache key: when it
+ *  changes (an edit in Settings), the fit summary is worked out again. */
+export function fitKeyOf(p: {
+  id: string;
+  bed_x_mm?: number | null;
+  bed_y_mm?: number | null;
+  bed_z_mm?: number | null;
+  print_areas?: unknown;
+  feeders?: Array<{ first_slot?: number | null; slot_count: number; nozzle?: string | null; is_dry_box?: boolean }>;
+  loaded_slots?: Array<{ slot_index: number; filament_id: string }>;
+  extruder_clearance_radius?: number | null;
+  extruder_clearance_dist_to_rod?: number | null;
+  extruder_clearance_height_to_rod?: number | null;
+  extruder_clearance_height_to_lid?: number | null;
+}): string {
+  return JSON.stringify([
+    p.id,
+    p.bed_x_mm ?? null,
+    p.bed_y_mm ?? null,
+    p.bed_z_mm ?? null,
+    p.print_areas ?? [],
+    (p.feeders ?? []).map((f) => [f.first_slot ?? null, f.slot_count, f.nozzle ?? null, !!f.is_dry_box]),
+    (p.loaded_slots ?? []).map((s) => [s.slot_index, s.filament_id]),
+    p.extruder_clearance_radius ?? null,
+    p.extruder_clearance_dist_to_rod ?? null,
+    p.extruder_clearance_height_to_rod ?? null,
+    p.extruder_clearance_height_to_lid ?? null,
+  ]);
+}
+
 /** Why Print! can't send this automatic layout, or null when it can: a part off the bed
  *  or too tall for the printer, or a part no nozzle area fits. */
 export function printBlockReason(c: Pick<PlateCheck, "off_plate" | "too_tall" | "unreachable"> | null | undefined): string | null {
