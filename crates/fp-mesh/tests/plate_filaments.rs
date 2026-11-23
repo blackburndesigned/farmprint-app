@@ -257,6 +257,7 @@ fn every_slicer_file_gets_the_same_numbers_and_parses() {
         },
         loaded_slots: vec![slot(3, "red", "#FF0000"), slot(1, "white", "#FFFFFF")],
         item_filaments: vec![fil("red"), fil("green"), fil("blue"), fil("red")],
+        ..Default::default()
     };
     let bytes = write_3mf_plate_with(&items, &opts).unwrap();
     let names = zip_names(&bytes);
