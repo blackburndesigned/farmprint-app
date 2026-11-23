@@ -1091,12 +1091,18 @@ impl ShopLedger {
               AND id NOT IN (SELECT product_id FROM overstock);
             DELETE FROM printer_slots WHERE printer_id GLOB 'sample-*'
               AND printer_id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL);
+            DELETE FROM printer_feeder_spools WHERE feeder_id IN (
+              SELECT id FROM printer_feeders WHERE printer_id GLOB 'sample-*'
+                AND printer_id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL));
+            DELETE FROM printer_feeders WHERE printer_id GLOB 'sample-*'
+              AND printer_id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL);
             DELETE FROM printers WHERE id GLOB 'sample-*'
               AND id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL);
             DELETE FROM filaments WHERE id GLOB 'sample-*'
               AND id NOT IN (SELECT filament_id FROM part_units)
               AND id NOT IN (SELECT default_filament_id FROM catalog_parts)
               AND id NOT IN (SELECT filament_id FROM printer_slots)
+              AND id NOT IN (SELECT filament_id FROM printer_feeder_spools)
               AND id NOT IN (SELECT filament_id FROM overstock);
             ",
         )?;

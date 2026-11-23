@@ -13,7 +13,11 @@ import { groupLaneUnits, laneCountLabel } from "./laneGroups";
 import { isThumbnailOnlyPart } from "../../partThumbnails";
 import { Check, Circle, CircleDot, Palette, X } from "lucide-react";
 import { Icon } from "../../icons";
-import { loadIntoNextSlot, slotIdsByPosition, slotsHoldingSwatch, unloadSlot } from "./printerSlots";
+import { setSlotFilament, slotIdsByPosition, slotsHoldingSwatch, unloadSlot } from "./printerSlots";
+import { dryBoxIds, feedersOf, feederPayload, loadIntoFeeders } from "./printerFeeders";
+import { type FeederCellRef, FeederBoxes } from "./FeederBoxes";
+import { FeederEditor } from "./FeederEditor";
+import "./feeders.css";
 import { UNASSIGNED_LANE_ID, printerLaneUnits, unassignedLaneUnits } from "./markPrinting";
 
 export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
@@ -29,6 +33,10 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   useEffect(() => { setLocalFilaments(snapshot.filaments); }, [snapshot.filaments]);
 
   const [editingPrinterSlotsId, setEditingPrinterSlotsId] = useState<string | null>(null);
+  // In the spool sheet: the feeder slot the next picked swatch goes into (null = next free slot).
+  const [pickedCell, setPickedCell] = useState<FeederCellRef | null>(null);
+  const [showFeederEditor, setShowFeederEditor] = useState(false);
+  useEffect(() => { setPickedCell(null); setShowFeederEditor(false); }, [editingPrinterSlotsId]);
   const [showAddPrinterModal, setShowAddPrinterModal] = useState(false);
   const [newPrinterName, setNewPrinterName] = useState("");
   const [newPrinterModel, setNewPrinterModel] = useState("Bambu P1S");
@@ -137,10 +145,47 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
       notifyError(`${printer.name}'s filament slots were not saved`, e);
     }
   };
-  const handleLoadPrinterFilamentSlot = (printer: Printer, swatch: FilamentSwatch) =>
-    savePrinterFilamentSlots(printer, loadIntoNextSlot(slotIdsByPosition(printer.loaded_slots), swatch.id));
-  const handleUnloadPrinterFilamentSlot = (printer: Printer, slotNumber: number) =>
-    savePrinterFilamentSlots(printer, unloadSlot(slotIdsByPosition(printer.loaded_slots), slotNumber));
+  const applySnapshot = (updated?: ShopSnapshot) => {
+    if (updated?.printers) { setLocalPrinters(updated.printers); onSnapshotUpdated?.(updated); }
+  };
+  const saveDryBox = async (printer: Printer, feederId: string, filamentIds: string[]) => {
+    try {
+      applySnapshot(await invoke<ShopSnapshot>("set_dry_box_spools", { feeder_id: feederId, filament_ids: filamentIds }));
+    } catch (e) {
+      notifyError(`${printer.name}'s dry box was not saved`, e);
+    }
+  };
+  const saveFeeders = async (printer: Printer, feeders: ReturnType<typeof feederPayload>) => {
+    try {
+      applySnapshot(await invoke<ShopSnapshot>("set_printer_feeders", { printer_id: printer.id, feeders }));
+    } catch (e) {
+      notifyError(`${printer.name}'s feeders were not saved`, e);
+    }
+  };
+  // A picked feeder slot takes the swatch; otherwise it goes in the first free feeding slot.
+  const handleLoadPrinterFilamentSlot = (printer: Printer, swatch: FilamentSwatch) => {
+    const feeders = feedersOf(printer);
+    const ids = slotIdsByPosition(printer.loaded_slots);
+    const target = pickedCell ? feeders.find((f) => f.id === pickedCell.feederId) : undefined;
+    if (target && pickedCell) {
+      setPickedCell(null);
+      if (target.is_dry_box) return saveDryBox(printer, target.id, setSlotFilament(dryBoxIds(target), pickedCell.position, swatch.id));
+      return savePrinterFilamentSlots(printer, setSlotFilament(ids, (target.first_slot ?? 1) + pickedCell.position - 1, swatch.id));
+    }
+    const next = loadIntoFeeders(ids, feeders, swatch.id);
+    if (!next) {
+      notifyError(`${swatch.name} was not loaded`, `Every feeder slot on ${printer.name} is full. Pick a slot to replace, or add a feeder.`);
+      return;
+    }
+    return savePrinterFilamentSlots(printer, next);
+  };
+  const handleUnloadPicked = (printer: Printer) => {
+    const target = pickedCell ? feedersOf(printer).find((f) => f.id === pickedCell.feederId) : undefined;
+    if (!target || !pickedCell) return;
+    setPickedCell(null);
+    if (target.is_dry_box) return saveDryBox(printer, target.id, unloadSlot(dryBoxIds(target), pickedCell.position));
+    return savePrinterFilamentSlots(printer, unloadSlot(slotIdsByPosition(printer.loaded_slots), (target.first_slot ?? 1) + pickedCell.position - 1));
+  };
 
   const renderSliceComposite40 = (order?: Order, line?: OrderLine, unit?: PartUnit) => {
     const prod = line ? productById.get(line.product_id) : unit ? productById.get(unit.product_id) : undefined;
@@ -232,15 +277,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     <span style={{ fontSize: 40, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: isPrinting ? "#64d2ff" : "rgba(235,235,245,0.4)" }}>
                       {laneUnits.length > 0 ? `~${Math.max(1, Math.round(totalMins / 60))}h ${totalMins % 60}m` : "0m"}
                     </span>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {printer.loaded_slots.map((s) => (
-                        <span key={s.slot_index} title={`Slot ${s.slot_index}: ${s.filament_name}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 999, background: "rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 700 }}>
-                          <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{s.slot_index}</span>
-                          <span style={{ width: 12, height: 12, borderRadius: "50%", background: s.filament_hex, border: "1.5px solid #fff" }} />
-                          {s.filament_name}
-                        </span>
-                      ))}
-                    </div>
+                    {!isUnassignedLane(printer) && <FeederBoxes feeders={feedersOf(printer)} variant="wall" />}
                   </div>
                 </div>
                 {laneUnits.length > 0 && (
@@ -277,17 +314,10 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     Marked Printing with no printer · use Assign to pick one
                   </div>
                 ) : (
-                <div onClick={() => setEditingPrinterSlotsId(printer.id)} title="Click to change loaded filament spools" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.06)", overflowX: "auto", cursor: "pointer" }}>
-                  {printer.loaded_slots.length === 0 ? (
-                    <span style={{ fontSize: 11, color: "rgba(235,235,245,0.55)" }}>+ No filament · tap to load spool</span>
-                  ) : (
-                    printer.loaded_slots.map((slot) => (
-                      <span key={slot.slot_index} title={`Slot ${slot.slot_index}: ${slot.filament_name}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 7px", borderRadius: 999, background: "rgba(255,255,255,0.07)", fontSize: 10.5, fontWeight: 600 }}>
-                        <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{slot.slot_index}</span>
-                        <span style={{ width: 14, height: 14, borderRadius: "50%", background: slot.filament_hex, border: "2px solid rgba(255,255,255,0.75)", boxShadow: "inset 0 0 0 3px rgba(0,0,0,0.28)" }} />
-                        <span>{slot.filament_name}</span>
-                      </span>
-                    ))
+                <div onClick={() => setEditingPrinterSlotsId(printer.id)} title="Click to change loaded filament spools and feeders" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.06)", overflowX: "auto", cursor: "pointer" }}>
+                  <FeederBoxes feeders={feedersOf(printer)} variant="lane" />
+                  {feedersOf(printer).every((f) => f.spools.length === 0) && (
+                    <span style={{ fontSize: 11, color: "rgba(235,235,245,0.55)", whiteSpace: "nowrap" }}>Tap to load spools</span>
                   )}
                 </div>
                 )}
@@ -388,26 +418,45 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
       {/* Printer Loaded Filament Spool Picker Sheet */}
       {editingPrinter && (
         <div className="fp-modal-backdrop" onClick={() => setEditingPrinterSlotsId(null)}>
-          <div className="fp-modal-window" style={{ width: "min(560px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
+          <div className="fp-modal-window" style={{ width: "min(700px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
             <div className="fp-modal-header">
               <div>
                 <div className="fp-modal-title">{editingPrinter.name} — Loaded Filament Spools</div>
-                <div style={{ fontSize: 12, color: "rgba(235,235,245,0.6)" }}>Click a spool to load it into the next free slot on {editingPrinter.name}. Click it again to load the same color into another slot.</div>
+                <div style={{ fontSize: 12, color: "rgba(235,235,245,0.6)" }}>Click a spool to load it into the next free slot on {editingPrinter.name}, or pick a slot in a feeder first. Click it again to load the same color into another slot.</div>
               </div>
               <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" onClick={() => setEditingPrinterSlotsId(null)}>Done</button>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "10px 16px 0" }} aria-label={`Slots loaded on ${editingPrinter.name}`}>
-              {editingPrinter.loaded_slots.length === 0 ? (
-                <span style={{ fontSize: 12, color: "rgba(235,235,245,0.6)" }}>No slots loaded yet.</span>
-              ) : (
-                editingPrinter.loaded_slots.map((s) => (
-                  <span key={s.slot_index} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 4px 3px 9px", borderRadius: 999, background: "rgba(255,255,255,0.08)", fontSize: 12, fontWeight: 600, color: "#f8fafc" }}>
-                    <span style={{ fontSize: 10.5, color: "rgba(235,235,245,0.6)", fontVariantNumeric: "tabular-nums" }}>Slot {s.slot_index}</span>
-                    <span style={{ width: 12, height: 12, borderRadius: "50%", background: s.filament_hex, border: "1.5px solid rgba(255,255,255,0.8)" }} />
-                    {s.filament_name}
-                    <button type="button" aria-label={`Unload slot ${s.slot_index}`} title={`Unload slot ${s.slot_index}`} onClick={() => handleUnloadPrinterFilamentSlot(editingPrinter, s.slot_index)} style={{ width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.1)", color: "#f8fafc", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon icon={X} size={12} /></button>
-                  </span>
-                ))
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 16px 0" }} aria-label={`Feeders on ${editingPrinter.name}`}>
+              <FeederBoxes
+                feeders={feedersOf(editingPrinter)}
+                variant="sheet"
+                selected={pickedCell}
+                onCellClick={(f, c) =>
+                  setPickedCell((cur) => (cur && cur.feederId === f.id && cur.position === c.position ? null : { feederId: f.id, position: c.position }))
+                }
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5, color: "rgba(235,235,245,0.65)" }}>
+                {(() => {
+                  const f = pickedCell ? feedersOf(editingPrinter).find((x) => x.id === pickedCell.feederId) : undefined;
+                  if (!f || !pickedCell) return <span>Pick a swatch below to load it into the next free slot, or pick a slot above first.</span>;
+                  const where = f.is_dry_box ? `${f.name} · spot ${pickedCell.position}` : `Slot ${(f.first_slot ?? 1) + pickedCell.position - 1} (${f.name})`;
+                  const filled = f.spools.some((s) => s.slot_index === (f.is_dry_box ? pickedCell.position : (f.first_slot ?? 1) + pickedCell.position - 1));
+                  return (
+                    <>
+                      <span>Next swatch goes in <b>{where}</b>.</span>
+                      {filled && <button type="button" className="fp-btn fp-btn-sm" onClick={() => void handleUnloadPicked(editingPrinter)}>Unload {where}</button>}
+                    </>
+                  );
+                })()}
+                <div style={{ flex: 1 }} />
+                <button type="button" className="fp-btn fp-btn-sm" aria-expanded={showFeederEditor} onClick={() => setShowFeederEditor((v) => !v)}>
+                  {showFeederEditor ? "Hide feeders" : "Edit feeders…"}
+                </button>
+              </div>
+              {showFeederEditor && (
+                <div style={{ padding: 10, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)" }}>
+                  <FeederEditor printerName={editingPrinter.name} feeders={feedersOf(editingPrinter)} onSave={(f) => saveFeeders(editingPrinter, f)} />
+                </div>
               )}
             </div>
             <div className="fp-modal-body" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: 8 }}>
