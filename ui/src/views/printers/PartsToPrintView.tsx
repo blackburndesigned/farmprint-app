@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { usePersistentState } from "../../usePersistentState";
 import { invoke } from "../../tauriInvoke";
 import { Order, OrderLine, OverstockItem, PartUnit, Product, ShopSnapshot } from "../../types";
 import { ProductCompositeThumbnail3D } from "../../components/PartThumbnail3D";
@@ -143,8 +144,12 @@ export const PartsToPrintView: React.FC<PrintersQueueCommonProps> = ({
   // Off by default: FarmPrint doesn't pick a printer; Settings › Printers › "Suggest a printer" turns the hint on.
   const suggestPrinter = !!useShopSettings().suggest_printer;
   const [localOpen, setLocalOpen] = useState(false);
-  const [productFilter, setProductFilter] = useState<string>("ALL");
-  const [sortMode, setSortMode] = useState<"color" | "order">("order");
+  const productFilterAllowed = useMemo(
+    () => ["ALL", ...snapshot.products.map((p) => p.id)],
+    [snapshot.products]
+  );
+  const [productFilter, setProductFilter] = usePersistentState("partsToPrint.productFilter", "ALL", productFilterAllowed);
+  const [sortMode, setSortMode] = usePersistentState("partsToPrint.sortMode", "order", ["order", "color"] as const);
   const isOpen = showSuggestedGroups || localOpen;
   const setOpen = (v: boolean) => {
     setLocalOpen(v);

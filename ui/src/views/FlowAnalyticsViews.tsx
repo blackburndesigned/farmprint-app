@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { usePersistentState } from "../usePersistentState";
 import { Order, OrderLine, PartUnit, Product, ShopSnapshot, TransitionEvent } from "../types";
 import { PartThumbnail3D, ProductCompositeThumbnail3D } from "../components/PartThumbnail3D";
 import { StatusLegendHeader, statusStepFor, unitMatchesStep } from "./OrdersAndonViews";
@@ -46,9 +47,13 @@ interface UnitTrail {
 }
 
 export const FlowView: React.FC<FlowViewProps> = ({ snapshot, onUndoEvent, onSelectOrder }) => {
-  const [sortMode, setSortMode] = useState<FlowSort>("recent");
+  const [sortMode, setSortMode] = usePersistentState(
+    "flow.sortMode",
+    "recent",
+    ["recent", "order", "nameAsc", "nameDesc"] as const satisfies readonly FlowSort[],
+  );
   const [search, setSearch] = useState("");
-  const [onlyFailed, setOnlyFailed] = useState(false);
+  const [onlyFailed, setOnlyFailed] = usePersistentState("flow.onlyFailed", false, [true, false] as const);
   const [clearedBefore, setClearedBefore] = useState<string>("");
   const [detailUnitId, setDetailUnitId] = useState<string | null>(null);
   const settings = useShopSettings();
