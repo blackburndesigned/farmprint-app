@@ -3,6 +3,7 @@
 // printer's slot numbers (slot N is still filament N in the slicer); a dry box holds
 // spools that are not loaded and has no slot numbers. Names are whatever the user types.
 import type { Printer, PrinterFeeder, PrinterSlot } from "../../types";
+import { displayBrand } from "../../filamentLabels";
 import { setSlotFilament, slotIdsByPosition } from "./printerSlots";
 
 /** Slots in the default feeder when fewer are loaded (matches fp-core). */
@@ -53,6 +54,32 @@ export function feederCaption(f: PrinterFeeder): string {
   if (f.is_dry_box) return `Dry box · ${n} slot${n === 1 ? "" : "s"}`;
   const first = f.first_slot ?? 1;
   return n === 1 ? `Slot ${first}` : `Slots ${first}–${first + n - 1}`;
+}
+
+/** Distinct brands loaded in a feeder, first-seen order. Blank brand is "No brand". */
+export function feederBrandLine(f: PrinterFeeder): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of f.spools) {
+    const label = displayBrand(s.brand);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out.join(", ");
+}
+
+/** Hover text for one slot: feeder, where, brand, type, and color name. */
+export function slotHoverTitle(f: PrinterFeeder, c: FeederCell): string {
+  const where = c.slotNumber !== null ? `Slot ${c.slotNumber}` : "dry box";
+  const head = `${f.name} · ${where}`;
+  if (!c.spool) return `${head}: Empty`;
+  const parts = [
+    displayBrand(c.spool.brand),
+    (c.spool.material || "").trim(),
+    (c.spool.filament_name || "").trim() || "Unknown",
+  ].filter((p) => p.length > 0);
+  return `${head}: ${parts.join(" · ")}`;
 }
 
 /** Loads a swatch into the first empty feeding slot. Null when every feeding slot is full. */

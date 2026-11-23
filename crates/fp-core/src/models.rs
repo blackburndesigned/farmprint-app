@@ -266,6 +266,10 @@ pub struct PrinterSlot {
     pub filament_name: String,
     pub filament_hex: String,
     pub material: String,
+    /// Brand from the filament library. Empty when unknown or unset.
+    /// Default keeps older snapshots readable.
+    #[serde(default)]
+    pub brand: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -134,6 +134,8 @@ export interface PrinterSlot {
   filament_name: string;
   filament_hex: string;
   material: string;
+  /** Brand from the filament library. Missing or empty when unknown or unset. */
+  brand?: string;
 }
 
 export interface Printer {

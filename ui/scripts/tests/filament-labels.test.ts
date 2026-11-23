@@ -2,6 +2,7 @@ import {
   displayBrand,
   displayVendor,
   suggestionValues,
+  shortTypeLabel,
   NO_BRAND_LABEL,
   UNSPECIFIED_VENDOR_LABEL,
 } from "../../src/filamentLabels";
@@ -20,5 +21,10 @@ check(
   "suggestions are unique, trimmed, first-seen, and skip blanks"
 );
 check(JSON.stringify(suggestionValues([null, "  ", undefined])) === "[]", "all-blank suggestions are empty");
+
+check(shortTypeLabel("") === "" && shortTypeLabel("   ") === "" && shortTypeLabel(null) === "", "blank type has no label");
+check(shortTypeLabel("PLA") === "PLA" && shortTypeLabel(" PETG ") === "PETG", "short types are trimmed and kept");
+check(shortTypeLabel("Polycarbonate") === "Polyc…", "long types truncate to 6 with an ellipsis");
+check(shortTypeLabel("PETG-CF", 8) === "PETG-CF" && shortTypeLabel("Polycarbonate", 8) === "Polycar…", "max length is honored");
 
 done();

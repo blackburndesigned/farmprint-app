@@ -171,7 +171,7 @@ pub(crate) fn load_dry_box_spools(
     missing_hex: &str,
 ) -> CoreResult<HashMap<String, Vec<PrinterSlot>>> {
     let mut stmt = conn.prepare(
-        "SELECT s.feeder_id, s.position, s.filament_id, f.name, f.hex, f.material
+        "SELECT s.feeder_id, s.position, s.filament_id, f.name, f.hex, f.material, f.brand
          FROM printer_feeder_spools s
          JOIN printer_feeders d ON d.id = s.feeder_id
          LEFT JOIN filaments f ON f.id = s.filament_id
@@ -187,11 +187,12 @@ pub(crate) fn load_dry_box_spools(
                 r.get::<_, Option<String>>(3)?,
                 r.get::<_, Option<String>>(4)?,
                 r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let mut out: HashMap<String, Vec<PrinterSlot>> = HashMap::new();
-    for (feeder_id, position, fid, name, hex, material) in rows {
+    for (feeder_id, position, fid, name, hex, material, brand) in rows {
         let fil = filament_map.and_then(|m| m.get(&fid));
         out.entry(feeder_id).or_default().push(PrinterSlot {
             slot_index: position,
@@ -204,6 +205,7 @@ pub(crate) fn load_dry_box_spools(
                 .map(|f| f.material.clone())
                 .or(material)
                 .unwrap_or_default(),
+            brand: fil.map(|f| f.brand.clone()).or(brand).unwrap_or_default(),
             filament_id: fid,
         });
     }
@@ -767,6 +769,7 @@ mod tests {
             filament_name: String::new(),
             filament_hex: String::new(),
             material: String::new(),
+            brand: String::new(),
         };
         let fs = layout_feeders("p", &rows, &[slot(1), slot(5)], &HashMap::new());
         assert_eq!(fs.len(), 2);

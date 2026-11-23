@@ -1,14 +1,14 @@
 // Feeders group a printer's slot numbers without changing them; a dry box holds spools
 // that are not loaded. Older snapshots without feeders read as one default feeder.
 import {
-  addFeederDraft, draftsFromFeeders, feederCaption, feederCells, feederDraftsChanged, feederDraftsProblem,
-  feederPayload, feedersOf, feedingCapacity, loadIntoFeeders, moveFeederDraft, spoolsUnloadedBy,
+  addFeederDraft, draftsFromFeeders, feederBrandLine, feederCaption, feederCells, feederDraftsChanged, feederDraftsProblem,
+  feederPayload, feedersOf, feedingCapacity, loadIntoFeeders, moveFeederDraft, slotHoverTitle, spoolsUnloadedBy,
 } from "../../src/views/printers/printerFeeders";
 import type { PrinterFeeder, PrinterSlot } from "../../src/types";
 import { check, done } from "./check";
 
-const slot = (slot_index: number, id: string): PrinterSlot => ({
-  slot_index, filament_id: id, filament_name: id, filament_hex: "#123456", material: "PLA",
+const slot = (slot_index: number, id: string, extra: Partial<PrinterSlot> = {}): PrinterSlot => ({
+  slot_index, filament_id: id, filament_name: id, filament_hex: "#123456", material: "PLA", ...extra,
 });
 
 // Old snapshot: no feeders field.
@@ -27,6 +27,33 @@ check(feedingCapacity(feeders) === 4, "dry boxes do not add printer slots");
 check(feederCells(feeders[2]).map((c) => c.slotNumber).join() === "3,4", "the second feeder holds slots 3 and 4");
 check(feederCells(feeders[1]).map((c) => `${c.slotNumber}:${c.spool?.filament_id ?? ""}`).join() === "null:,null:c,null:", "a dry box has positions, no slot numbers");
 check(feederCaption(feeders[0]) === "Slots 1–2" && feederCaption(feeders[1]) === "Dry box · 3 slots", "captions");
+
+const branded: PrinterFeeder = {
+  ...feeders[0],
+  spools: [
+    slot(1, "a", { brand: "Northline", material: "PLA", filament_name: "Matte Black" }),
+    slot(2, "b", { brand: "Northline", material: "PETG", filament_name: "Signal Red" }),
+  ],
+};
+check(feederBrandLine(branded) === "Northline", "one brand is listed once");
+check(feederBrandLine({ ...branded, spools: [...branded.spools, slot(3, "c", { brand: "River", material: "PLA" })] }) === "Northline, River", "distinct brands stay in first-seen order");
+check(feederBrandLine({ ...feeders[0], spools: [slot(1, "a", { brand: "" }), slot(2, "b", { brand: "  " })] }) === "No brand", "blank brands show as No brand");
+check(feederBrandLine({ ...feeders[0], spools: [] }) === "", "an empty feeder has no brand line");
+check(
+  slotHoverTitle(branded, { position: 1, slotNumber: 1, spool: branded.spools[0] }) ===
+    "Left · Slot 1: Northline · PLA · Matte Black",
+  "hover names brand, type, color and slot",
+);
+check(
+  slotHoverTitle(feeders[1], { position: 2, slotNumber: null, spool: feeders[1].spools[0] }) ===
+    "Box · dry box: No brand · PLA · c",
+  "a dry box hover says dry box and has no slot number",
+);
+check(
+  slotHoverTitle(feeders[0], { position: 1, slotNumber: 1, spool: null }) === "Left · Slot 1: Empty",
+  "an empty slot hover says Empty",
+);
+
 
 // Loading goes to the first empty feeding slot and never past the last feeder.
 check(loadIntoFeeders(["a", "b", "", "d"], feeders, "e")?.join() === "a,b,e,d", "fills empty slot 3");
