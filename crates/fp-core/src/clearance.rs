@@ -420,4 +420,43 @@ mod tests {
         assert_eq!(f.extruder_clearance_radius, Some(20.0));
         assert_eq!(f.extruder_clearance_height_to_rod, Some(33.0));
     }
+
+    /// What the plate view reads after a Settings edit: the bed size and clearance just
+    /// saved, with no restart (fields `bed_x_mm` / `bed_y_mm` / `bed_z_mm` and the four
+    /// `extruder_clearance_*`).
+    #[test]
+    fn plate_reads_see_settings_edits_at_once() {
+        let (mut ledger, ids) = ledger_and_printers();
+        let pid = &ids[0];
+        ledger
+            .set_printer_bed_size(pid, Some(325.0), Some(320.0), Some(320.0))
+            .unwrap();
+        ledger
+            .set_printer_extruder_clearance(
+                pid,
+                ExtruderClearance {
+                    extruder_clearance_radius: Some(60.0),
+                    extruder_clearance_height_to_rod: Some(25.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            ledger.printer_build_volume_mm(pid).unwrap(),
+            (Some(325.0), Some(320.0), Some(320.0))
+        );
+        let e = ledger.printer_effective_clearance(pid).unwrap().unwrap();
+        assert_eq!((e.radius, e.height_to_rod), (60.0, 25.0));
+        let p = ledger
+            .snapshot()
+            .unwrap()
+            .printers
+            .into_iter()
+            .find(|p| &p.id == pid)
+            .unwrap();
+        assert_eq!(
+            (p.bed_x_mm, p.bed_y_mm, p.bed_z_mm),
+            (Some(325.0), Some(320.0), Some(320.0))
+        );
+    }
 }
