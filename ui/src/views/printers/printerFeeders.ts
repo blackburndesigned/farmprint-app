@@ -2,7 +2,7 @@
 // spools, each with its own slot count. Feeders that feed the printer only group the
 // printer's slot numbers (slot N is still filament N in the slicer); a dry box holds
 // spools that are not loaded and has no slot numbers. Names are whatever the user types.
-import type { Printer, PrinterFeeder, PrinterSlot } from "../../types";
+import type { FeederNozzle, Printer, PrinterFeeder, PrinterSlot } from "../../types";
 import { displayBrand } from "../../filamentLabels";
 import { setSlotFilament, slotIdsByPosition } from "./printerSlots";
 
@@ -122,10 +122,14 @@ export interface FeederDraft {
   slot_count: number;
   is_dry_box: boolean;
   note: string;
+  /** Nozzle it feeds; null = not set. Only offered on printers with print areas. */
+  nozzle?: FeederNozzle | null;
 }
 
 export const draftsFromFeeders = (feeders: readonly PrinterFeeder[]): FeederDraft[] =>
-  feeders.map((f) => ({ id: f.id, name: f.name, slot_count: f.slot_count, is_dry_box: f.is_dry_box, note: f.note ?? "" }));
+  feeders.map((f) => ({
+    id: f.id, name: f.name, slot_count: f.slot_count, is_dry_box: f.is_dry_box, note: f.note ?? "", nozzle: f.nozzle ?? null,
+  }));
 
 /** Adds a feeder named "Feeder N" with the first unused N. */
 export function addFeederDraft(drafts: readonly FeederDraft[]): FeederDraft[] {
@@ -177,6 +181,8 @@ export const feederPayload = (drafts: readonly FeederDraft[]) =>
     slot_count: Math.trunc(Number(d.slot_count)),
     is_dry_box: d.is_dry_box,
     note: d.note.trim() || null,
+    // A dry box feeds no nozzle.
+    nozzle: d.is_dry_box ? null : (d.nozzle ?? null),
   }));
 
 /** Whether the drafts differ from the saved feeders (auto feeders count as unsaved). */

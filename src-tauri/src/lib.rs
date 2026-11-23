@@ -1720,7 +1720,7 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
         "set_printer_feeders" => {
-            // { printer_id, feeders: [{ id?, name, slot_count, is_dry_box, note? }] }
+            // { printer_id, feeders: [{ id?, name, slot_count, is_dry_box, note?, nozzle? }] }
             let printer_id = args
                 .get("printer_id")
                 .or_else(|| args.get("printerId"))
@@ -1737,6 +1737,59 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .set_printer_feeders(printer_id, feeders)
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
+        "set_printer_print_areas" => {
+            // { printer_id, print_areas: [{ id?, name, nozzle: "left"|"right"|"both",
+            //   width_mm, depth_mm, height_mm, x_mm, y_mm }] }. An empty list clears them.
+            let printer_id = args
+                .get("printer_id")
+                .or_else(|| args.get("printerId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let areas: Vec<fp_core::PrintAreaInput> = args
+                .get("print_areas")
+                .or_else(|| args.get("printAreas"))
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|e| format!("Print areas not saved: {e}"))?
+                .unwrap_or_default();
+            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            let snap = ledger
+                .set_printer_print_areas(printer_id, areas)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
+        "set_printer_extruder_clearance" => {
+            // { printer_id, extruder_clearance_radius, extruder_clearance_dist_to_rod,
+            //   extruder_clearance_height_to_rod, extruder_clearance_height_to_lid }:
+            // numbers in mm (0–2000), or null / absent for empty.
+            let printer_id = args
+                .get("printer_id")
+                .or_else(|| args.get("printerId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let c: fp_core::ExtruderClearance = serde_json::from_value(args.clone())
+                .map_err(|e| format!("Extruder clearance not saved: {e}"))?;
+            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            let snap = ledger
+                .set_printer_extruder_clearance(printer_id, c)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
+        "printer_effective_clearance" => {
+            // { printer_id } -> { radius, height_to_rod, dist_to_rod, height_to_lid } in mm
+            // (printer field, else the plate view's remembered value, else the plate
+            // default), or null for an unknown printer.
+            let printer_id = args
+                .get("printer_id")
+                .or_else(|| args.get("printerId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            let c = ledger
+                .printer_effective_clearance(printer_id)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(c).map_err(|e| e.to_string())
         }
         "set_dry_box_spools" => {
             // { feeder_id, filament_ids: ["fil-…", "", …] } by position in the dry box.

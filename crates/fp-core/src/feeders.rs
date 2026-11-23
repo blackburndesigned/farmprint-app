@@ -7,7 +7,7 @@
 //! slots, so databases from before feeders need no data migration.
 
 use crate::models::{
-    CoreError, CoreResult, FeederInput, FilamentSwatch, PrinterFeeder, PrinterSlot,
+    CoreError, CoreResult, FeederInput, FeederNozzle, FilamentSwatch, PrinterFeeder, PrinterSlot,
 };
 use crate::ShopLedger;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -41,6 +41,7 @@ pub(crate) struct FeederRow {
     pub slot_count: i64,
     pub is_dry_box: bool,
     pub note: Option<String>,
+    pub nozzle: Option<FeederNozzle>,
 }
 
 /// Lays a printer's feeders over its slots. `saved` is in position order; `loaded` is the
@@ -68,6 +69,7 @@ pub(crate) fn layout_feeders(
             first_slot: Some(1),
             spools: loaded,
             auto: true,
+            nozzle: None,
         }];
     }
     let mut out = Vec::with_capacity(saved.len() + 1);
@@ -93,6 +95,7 @@ pub(crate) fn layout_feeders(
                 first_slot: None,
                 spools,
                 auto: false,
+                nozzle: row.nozzle,
             });
         } else {
             let end = next + row.slot_count;
@@ -109,6 +112,7 @@ pub(crate) fn layout_feeders(
                     .cloned()
                     .collect(),
                 auto: false,
+                nozzle: row.nozzle,
             });
             next = end;
         }
@@ -129,6 +133,7 @@ pub(crate) fn layout_feeders(
             first_slot: Some(next),
             spools: extra,
             auto: true,
+            nozzle: None,
         });
     }
     out
@@ -145,7 +150,8 @@ pub(crate) fn load_feeder_rows(
     conn: &Connection,
     printer_id: Option<&str>,
 ) -> CoreResult<Vec<FeederRow>> {
-    let sql = "SELECT id, printer_id, name, slot_count, is_dry_box, note FROM printer_feeders
+    let sql =
+        "SELECT id, printer_id, name, slot_count, is_dry_box, note, nozzle FROM printer_feeders
                WHERE ?1 IS NULL OR printer_id = ?1 ORDER BY printer_id, position, id";
     let mut stmt = conn.prepare(sql)?;
     let rows = stmt
@@ -157,6 +163,10 @@ pub(crate) fn load_feeder_rows(
                 slot_count: r.get(3)?,
                 is_dry_box: r.get::<_, i64>(4)? != 0,
                 note: r.get(5)?,
+                nozzle: r
+                    .get::<_, Option<String>>(6)?
+                    .as_deref()
+                    .and_then(FeederNozzle::parse),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -295,7 +305,15 @@ impl ShopLedger {
             );
         }
 
-        let mut rows: Vec<(String, String, i64, bool, Option<String>)> = Vec::new();
+        type Row = (
+            String,
+            String,
+            i64,
+            bool,
+            Option<String>,
+            Option<FeederNozzle>,
+        );
+        let mut rows: Vec<Row> = Vec::new();
         let mut slots: Vec<(i64, String)> = Vec::new();
         let mut dry: Vec<(String, i64, String)> = Vec::new();
         let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -329,7 +347,15 @@ impl ShopLedger {
             if !f.is_dry_box {
                 next += f.slot_count;
             }
-            rows.push((id, name, f.slot_count, f.is_dry_box, tidy_note(&f.note)));
+            rows.push((
+                id,
+                name,
+                f.slot_count,
+                f.is_dry_box,
+                tidy_note(&f.note),
+                // A dry box feeds no nozzle.
+                if f.is_dry_box { None } else { f.nozzle },
+            ));
         }
 
         let tx = self.conn.transaction()?;
@@ -345,11 +371,20 @@ impl ShopLedger {
             "DELETE FROM printer_slots WHERE printer_id = ?1",
             params![printer_id],
         )?;
-        for (pos, (id, name, count, is_dry, note)) in rows.iter().enumerate() {
+        for (pos, (id, name, count, is_dry, note, nozzle)) in rows.iter().enumerate() {
             tx.execute(
-                "INSERT INTO printer_feeders (id, printer_id, position, name, slot_count, is_dry_box, note)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![id, printer_id, pos as i64, name, count, *is_dry as i64, note],
+                "INSERT INTO printer_feeders (id, printer_id, position, name, slot_count, is_dry_box, note, nozzle)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    id,
+                    printer_id,
+                    pos as i64,
+                    name,
+                    count,
+                    *is_dry as i64,
+                    note,
+                    nozzle.map(FeederNozzle::as_str)
+                ],
             )?;
         }
         for (idx, fid) in &slots {
@@ -439,6 +474,7 @@ mod tests {
             slot_count: slots,
             is_dry_box: dry,
             note: None,
+            nozzle: None,
         }
     }
 
@@ -608,6 +644,7 @@ mod tests {
                         slot_count: 1,
                         is_dry_box: true,
                         note: Some("  ".into()),
+                        nozzle: None,
                     },
                 ],
             )
@@ -626,6 +663,7 @@ mod tests {
                     slot_count: 1,
                     is_dry_box: true,
                     note: None,
+                    nozzle: None,
                 }],
             )
             .unwrap();
@@ -762,6 +800,7 @@ mod tests {
             slot_count: 2,
             is_dry_box: false,
             note: None,
+            nozzle: None,
         }];
         let slot = |i: i64| PrinterSlot {
             slot_index: i,

@@ -17,6 +17,10 @@ import { loadedSlotCount, setSlotFilament, slotIdsByPosition, unloadSlot } from 
 import { dryBoxIds, feederCaption, feederCells, feedersOf, feedingCapacity } from "../../views/printers/printerFeeders";
 import { FeederBoxes } from "../../views/printers/FeederBoxes";
 import { FeederEditor } from "../../views/printers/FeederEditor";
+import { PrintAreasEditor } from "../../views/printers/PrintAreasEditor";
+import { ExtruderClearanceFields } from "../../views/printers/ExtruderClearanceFields";
+import type { PlateEntry } from "../../views/printers/extruderClearance";
+import { hasPrintAreas } from "../../views/printers/printAreas";
 
 // --- Printers -------------------------------------------------------------------
 
@@ -97,11 +101,13 @@ const PrinterEditSheet: React.FC<{
   filaments: FilamentSwatch[];
   accent: string;
   modelSuggestions: string[];
+  /** The plate view's remembered settings for this printer (placeholders for clearance). */
+  plate: PlateEntry;
   onAccent: (hex: string) => void;
   run: (cmd: string, args: Record<string, unknown>) => Promise<void>;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ printer: p, filaments, accent, modelSuggestions, onAccent, run, onRemove, onClose }) => {
+}> = ({ printer: p, filaments, accent, modelSuggestions, plate, onAccent, run, onRemove, onClose }) => {
   const [name, setName] = useState(p.name);
   const [model, setModel] = useState(p.model);
   useEffect(() => setName(p.name), [p.name]);
@@ -211,7 +217,39 @@ const PrinterEditSheet: React.FC<{
                 {feeders.length} feeder{feeders.length === 1 ? "" : "s"} · {loadedSlotCount(slotIds)} of {feedingCapacity(feeders)} slots loaded
               </span>
             </div>
-            <FeederEditor printerName={p.name} feeders={feeders} onSave={(f) => run("set_printer_feeders", { printer_id: p.id, feeders: f })} />
+            <FeederEditor
+              printerName={p.name}
+              feeders={feeders}
+              showNozzle={hasPrintAreas(p)}
+              onSave={(f) => run("set_printer_feeders", { printer_id: p.id, feeders: f })}
+            />
+          </div>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700 }}>Print areas</div>
+              <span style={caption}>
+                {hasPrintAreas(p) ? `${p.print_areas!.length} area${p.print_areas!.length === 1 ? "" : "s"}` : "Whole bed"}
+              </span>
+            </div>
+            <PrintAreasEditor
+              printer={p}
+              datalistId="fp-settings-print-area-names"
+              onSave={(areas) => run("set_printer_print_areas", { printer_id: p.id, print_areas: areas })}
+            />
+          </div>
+
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700 }}>Extruder clearance</div>
+              <span style={caption}>For printing by object. A gray value is what an empty field uses.</span>
+            </div>
+            <ExtruderClearanceFields
+              printer={p}
+              plate={plate}
+              inputStyle={sheetInput}
+              onCommit={(c) => void run("set_printer_extruder_clearance", { printer_id: p.id, ...c })}
+            />
           </div>
 
           <div>
@@ -452,6 +490,7 @@ export const PrintersTab: React.FC<{
       </Section>
       {editing && (
         <PrinterEditSheet
+          plate={settings.printer_plate?.[editing.id]}
           printer={editing}
           filaments={filaments}
           accent={accentOf(editing.id)}

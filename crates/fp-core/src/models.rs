@@ -300,6 +300,32 @@ pub struct Printer {
     /// feeder holding its current slots.
     #[serde(default)]
     pub feeders: Vec<PrinterFeeder>,
+    /// Optional areas of the bed a print can use, for printers whose nozzles each reach
+    /// only part of the bed. Empty = the whole bed (every printer before print areas).
+    /// See `print_areas::print_area_for_slots` for which area a part must sit in.
+    #[serde(default)]
+    pub print_areas: Vec<PrintArea>,
+    /// By-object extruder clearance (slicer parameter names, mm), all optional.
+    #[serde(flatten)]
+    pub extruder_clearance: ExtruderClearance,
+}
+
+/// A printer's by-object extruder clearance, named like the slicer's parameters. Values
+/// in mm; None = empty (no built-in values). See `clearance::effective_extruder_clearance`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub struct ExtruderClearance {
+    /// Max radius.
+    #[serde(default)]
+    pub extruder_clearance_radius: Option<f64>,
+    /// Distance to rod.
+    #[serde(default)]
+    pub extruder_clearance_dist_to_rod: Option<f64>,
+    /// Height to rod.
+    #[serde(default)]
+    pub extruder_clearance_height_to_rod: Option<f64>,
+    /// Height to lid.
+    #[serde(default)]
+    pub extruder_clearance_height_to_lid: Option<f64>,
 }
 
 /// A named unit on a printer that holds spools, with its own number of slots. The name
@@ -328,6 +354,97 @@ pub struct PrinterFeeder {
     /// the holder for loaded slots past the last saved feeder.
     #[serde(default)]
     pub auto: bool,
+    /// Which nozzle this feeder feeds, on a printer with print areas. None = not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nozzle: Option<FeederNozzle>,
+}
+
+/// The nozzle a feeder feeds: "left" or "right" in JSON.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum FeederNozzle {
+    Left,
+    Right,
+}
+
+impl FeederNozzle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FeederNozzle::Left => "left",
+            FeederNozzle::Right => "right",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "left" => Some(FeederNozzle::Left),
+            "right" => Some(FeederNozzle::Right),
+            _ => None,
+        }
+    }
+}
+
+/// Which nozzles can print inside a print area: "left", "right" or "both" in JSON.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AreaNozzle {
+    Left,
+    Right,
+    #[default]
+    Both,
+}
+
+impl AreaNozzle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AreaNozzle::Left => "left",
+            AreaNozzle::Right => "right",
+            AreaNozzle::Both => "both",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "left" => Some(AreaNozzle::Left),
+            "right" => Some(AreaNozzle::Right),
+            "both" => Some(AreaNozzle::Both),
+            _ => None,
+        }
+    }
+}
+
+/// A rectangle of the bed (with a height) that a print can use. `x_mm` / `y_mm` place
+/// its front-left corner, in mm from the bed's front-left corner. Sizes are what the
+/// user typed; FarmPrint never fills them in for a printer model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PrintArea {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub nozzle: AreaNozzle,
+    pub width_mm: f64,
+    pub depth_mm: f64,
+    pub height_mm: f64,
+    #[serde(default)]
+    pub x_mm: f64,
+    #[serde(default)]
+    pub y_mm: f64,
+}
+
+/// One print area as the user edits it. `id` keeps an existing area; None adds one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct PrintAreaInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub nozzle: AreaNozzle,
+    pub width_mm: f64,
+    pub depth_mm: f64,
+    pub height_mm: f64,
+    #[serde(default)]
+    pub x_mm: f64,
+    #[serde(default)]
+    pub y_mm: f64,
 }
 
 /// One feeder as the user edits it. `id` keeps an existing feeder (and its spools);
@@ -343,6 +460,9 @@ pub struct FeederInput {
     pub is_dry_box: bool,
     #[serde(default)]
     pub note: Option<String>,
+    /// "left" / "right", or absent / null for none.
+    #[serde(default)]
+    pub nozzle: Option<FeederNozzle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

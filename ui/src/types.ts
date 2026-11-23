@@ -157,6 +157,32 @@ export interface Printer {
   bed_z_mm?: number | null;
   /** Units holding this printer's spools, in order. Absent on older snapshots. */
   feeders?: PrinterFeeder[];
+  /** Optional parts of the bed a print can use, for printers whose nozzles each reach only
+   *  part of the bed. Absent or empty = the whole bed. See `printAreaForSlots`. */
+  print_areas?: PrintArea[];
+  /** By-object extruder clearance, slicer parameter names, mm. null/absent = empty. */
+  extruder_clearance_radius?: number | null;
+  extruder_clearance_dist_to_rod?: number | null;
+  extruder_clearance_height_to_rod?: number | null;
+  extruder_clearance_height_to_lid?: number | null;
+}
+
+/** The nozzle a feeder feeds (see fp-core `FeederNozzle`). */
+export type FeederNozzle = "left" | "right";
+/** Which nozzles can print inside a print area (see fp-core `AreaNozzle`). */
+export type AreaNozzle = "left" | "right" | "both";
+
+/** A rectangle of the bed, with a height, that a print can use (see fp-core `PrintArea`).
+ *  `x_mm` / `y_mm` place its front-left corner, in mm from the bed's front-left corner. */
+export interface PrintArea {
+  id: string;
+  name: string;
+  nozzle: AreaNozzle;
+  width_mm: number;
+  depth_mm: number;
+  height_mm: number;
+  x_mm: number;
+  y_mm: number;
 }
 
 /** A named unit on a printer holding spools (see fp-core `PrinterFeeder`). Feeders that
@@ -173,6 +199,8 @@ export interface PrinterFeeder {
   spools: PrinterSlot[];
   /** Not saved by the user (the default feeder, or loaded slots past the last feeder). */
   auto?: boolean;
+  /** Which nozzle it feeds, on a printer with print areas. Absent = not set. */
+  nozzle?: FeederNozzle;
 }
 
 export interface OverstockItem {

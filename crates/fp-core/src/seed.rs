@@ -54,6 +54,18 @@ pub const PRINTER_BED_COLUMNS: [(&str, &str); 3] = [
 /// Existing rows stay NULL and show as unspecified in the library.
 pub const FILAMENT_VENDOR_COLUMNS: [(&str, &str); 1] = [("vendor", "TEXT")];
 
+/// By-object extruder clearance per printer (2026-11-22), slicer parameter names, mm:
+/// nullable, additive, empty by default. Schema version unchanged (3).
+pub const PRINTER_CLEARANCE_COLUMNS: [(&str, &str); 4] = [
+    ("extruder_clearance_radius", "REAL"),
+    ("extruder_clearance_dist_to_rod", "REAL"),
+    ("extruder_clearance_height_to_rod", "REAL"),
+    ("extruder_clearance_height_to_lid", "REAL"),
+];
+
+/// Feeder nozzle for print areas (2026-11-22): nullable, additive. Schema version unchanged (3).
+pub const FEEDER_NOZZLE_COLUMNS: [(&str, &str); 1] = [("nozzle", "TEXT")];
+
 pub fn init_schema(conn: &Connection) -> CoreResult<()> {
     init_tables(conn)?;
     add_missing_columns(conn, "orders", &ORDER_SHIP_COLUMNS)?;
@@ -61,6 +73,7 @@ pub fn init_schema(conn: &Connection) -> CoreResult<()> {
     add_missing_columns(conn, "order_lines", &ORDER_LINE_VIEW_COLUMNS)?;
     add_missing_columns(conn, "flow_events", &FLOW_UNDO_COLUMNS)?;
     add_missing_columns(conn, "printers", &PRINTER_BED_COLUMNS)?;
+    add_missing_columns(conn, "printers", &PRINTER_CLEARANCE_COLUMNS)?;
     add_missing_columns(conn, "filaments", &FILAMENT_VENDOR_COLUMNS)?;
     // Lookup indexes (additive, schema version unchanged). Safe to run on every open.
     conn.execute_batch(
@@ -95,6 +108,25 @@ pub fn init_schema(conn: &Connection) -> CoreResult<()> {
             PRIMARY KEY (feeder_id, position)
         );",
     )?;
+    // Dual-nozzle print areas (2026-11-22): additive, local only. Schema version unchanged (3).
+    // A feeder's `nozzle` is "left", "right" or NULL (not set); a printer with no
+    // `printer_print_areas` rows uses its whole bed, exactly as before.
+    add_missing_columns(conn, "printer_feeders", &FEEDER_NOZZLE_COLUMNS)?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS printer_print_areas (
+            id TEXT PRIMARY KEY,
+            printer_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            nozzle TEXT NOT NULL DEFAULT 'both',
+            width_mm REAL NOT NULL,
+            depth_mm REAL NOT NULL,
+            height_mm REAL NOT NULL,
+            x_mm REAL NOT NULL DEFAULT 0,
+            y_mm REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_printer_print_areas_printer ON printer_print_areas(printer_id, position);",
+    )?;
     // Local dedupe map for website ingest. Kept when the local order is deleted, so a
     // deleted website order is never re-imported (FarmPrint never writes back to the shop).
     conn.execute_batch(
@@ -104,6 +136,8 @@ pub fn init_schema(conn: &Connection) -> CoreResult<()> {
             imported_at TEXT NOT NULL
         );",
     )?;
+    // Plate view clearance -> printer fields, once (see `clearance::copy_plate_clearance_once`).
+    crate::clearance::copy_plate_clearance_once(conn)?;
     Ok(())
 }
 

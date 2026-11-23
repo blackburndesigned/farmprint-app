@@ -19,6 +19,7 @@ import { suggestionValues } from "../../filamentLabels";
 import { printerModelToSave, printerNameToSave } from "../../printerLabels";
 import { type FeederCellRef, FeederBoxes } from "./FeederBoxes";
 import { FeederEditor } from "./FeederEditor";
+import { hasPrintAreas } from "./printAreas";
 import "./feeders.css";
 import { UNASSIGNED_LANE_ID, printerLaneUnits, unassignedLaneUnits } from "./markPrinting";
 
@@ -471,7 +472,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
               </div>
               {showFeederEditor && (
                 <div style={{ padding: 10, borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)" }}>
-                  <FeederEditor printerName={editingPrinter.name} feeders={feedersOf(editingPrinter)} onSave={(f) => saveFeeders(editingPrinter, f)} />
+                  <FeederEditor printerName={editingPrinter.name} feeders={feedersOf(editingPrinter)} showNozzle={hasPrintAreas(editingPrinter)} onSave={(f) => saveFeeders(editingPrinter, f)} />
                 </div>
               )}
             </div>
