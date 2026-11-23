@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import "./feeders.css";
-import type { PrinterFeeder } from "../../types";
+import type { FeederNozzle, PrinterFeeder } from "../../types";
 import { askConfirm } from "../../uiFeedback";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { Icon } from "../../icons";
@@ -12,13 +12,16 @@ import {
 /**
  * Edits a printer's feeder list: names, slot counts, dry box, note, order. Nothing is
  * saved until Save feeders; saving asks first when spools would be unloaded.
+ * `showNozzle` (only on printers with print areas) adds the nozzle each feeder feeds;
+ * when hidden, saved nozzles are kept as they are.
  */
 export const FeederEditor: React.FC<{
   printerName: string;
   feeders: PrinterFeeder[];
+  showNozzle?: boolean;
   onSave: (payload: ReturnType<typeof feederPayload>) => Promise<void>;
-}> = ({ printerName, feeders, onSave }) => {
-  const savedKey = JSON.stringify(feeders.map((f) => [f.id, f.name, f.slot_count, f.is_dry_box, f.note ?? "", !!f.auto]));
+}> = ({ printerName, feeders, showNozzle = false, onSave }) => {
+  const savedKey = JSON.stringify(feeders.map((f) => [f.id, f.name, f.slot_count, f.is_dry_box, f.note ?? "", !!f.auto, f.nozzle ?? ""]));
   const [drafts, setDrafts] = useState<FeederDraft[]>(() => draftsFromFeeders(feeders));
   const [busy, setBusy] = useState(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -57,7 +60,7 @@ export const FeederEditor: React.FC<{
             value={d.name}
             placeholder={`Feeder ${i + 1}`}
             onChange={(e) => patch(i, { name: e.target.value })}
-            style={{ flex: "1 1 120px", minWidth: 100 }}
+            style={showNozzle ? { flex: "1 1 96px", minWidth: 80 } : { flex: "1 1 120px", minWidth: 100 }}
           />
           <label>
             <input
@@ -76,13 +79,27 @@ export const FeederEditor: React.FC<{
             <input type="checkbox" checked={d.is_dry_box} onChange={(e) => patch(i, { is_dry_box: e.target.checked })} />
             Dry box
           </label>
+          {showNozzle && (
+            <select
+              className="fp-feeder-nozzle"
+              aria-label={`Feeder ${i + 1} nozzle`}
+              title={d.is_dry_box ? "A dry box doesn't feed a nozzle." : "Which nozzle this feeder feeds, so parts using it can be placed inside that nozzle's print area."}
+              value={d.is_dry_box ? "" : (d.nozzle ?? "")}
+              disabled={d.is_dry_box}
+              onChange={(e) => patch(i, { nozzle: (e.target.value || null) as FeederNozzle | null })}
+            >
+              <option value="">No nozzle</option>
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+            </select>
+          )}
           <input
             type="text"
             aria-label={`Feeder ${i + 1} note`}
             value={d.note}
             placeholder="Note (optional)"
             onChange={(e) => patch(i, { note: e.target.value })}
-            style={{ flex: "1 1 110px", minWidth: 90 }}
+            style={showNozzle ? { flex: "1 1 90px", minWidth: 70 } : { flex: "1 1 110px", minWidth: 90 }}
           />
           <button type="button" className="fp-btn fp-btn-sm fp-btn-ghost" aria-label={`Move feeder ${i + 1} up`} title="Move up" disabled={i === 0} onClick={() => setDrafts((ds) => moveFeederDraft(ds, i, -1))}>
             <Icon icon={ArrowUp} size={13} />

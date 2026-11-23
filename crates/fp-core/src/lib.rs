@@ -1,7 +1,9 @@
 pub mod applock;
+pub mod clearance;
 pub mod delta;
 pub mod feeders;
 pub mod models;
+pub mod print_areas;
 pub mod sample;
 pub mod seed;
 
@@ -546,6 +548,7 @@ impl ShopLedger {
             DELETE FROM imported_store_orders;
             DELETE FROM printer_feeder_spools;
             DELETE FROM printer_feeders;
+            DELETE FROM printer_print_areas;
             DELETE FROM printer_slots;
             DELETE FROM printers;
             DELETE FROM catalog_parts;
@@ -586,6 +589,7 @@ impl ShopLedger {
             DELETE FROM order_lines;
             DELETE FROM printer_feeder_spools;
             DELETE FROM printer_feeders;
+            DELETE FROM printer_print_areas;
             DELETE FROM printer_slots;
             DELETE FROM printers;
             DELETE FROM catalog_parts;
@@ -1904,6 +1908,10 @@ impl ShopLedger {
             "DELETE FROM printer_feeders WHERE printer_id = ?1",
             params![printer_id],
         )?;
+        tx.execute(
+            "DELETE FROM printer_print_areas WHERE printer_id = ?1",
+            params![printer_id],
+        )?;
         tx.execute("DELETE FROM printers WHERE id = ?1", params![printer_id])?;
         tx.commit()?;
         self.snapshot()
@@ -2240,10 +2248,14 @@ impl ShopLedger {
             .collect::<Result<Vec<_>, _>>()?;
 
         let feeder_rows = feeders::load_feeder_rows(&self.conn, None)?;
+        let mut area_rows = print_areas::load_print_areas(&self.conn)?;
         let dry_spools =
             feeders::load_dry_box_spools(&self.conn, None, Some(filament_map), "#888888")?;
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm, bed_z_mm FROM printers ORDER BY id",
+            "SELECT id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm, bed_z_mm,
+                    extruder_clearance_radius, extruder_clearance_dist_to_rod,
+                    extruder_clearance_height_to_rod, extruder_clearance_height_to_lid
+             FROM printers ORDER BY id",
         )?;
         let printers = stmt
             .query_map([], |r| {
@@ -2271,6 +2283,7 @@ impl ShopLedger {
                     .cloned()
                     .collect();
                 let feeders = feeders::layout_feeders(&id, &saved, &loaded_slots, &dry_spools);
+                let print_areas = area_rows.remove(&id).unwrap_or_default();
                 Ok(Printer {
                     id,
                     name: r.get(1)?,
@@ -2286,6 +2299,13 @@ impl ShopLedger {
                     bed_y_mm: r.get(7)?,
                     bed_z_mm: r.get(8)?,
                     feeders,
+                    print_areas,
+                    extruder_clearance: ExtruderClearance {
+                        extruder_clearance_radius: r.get(9)?,
+                        extruder_clearance_dist_to_rod: r.get(10)?,
+                        extruder_clearance_height_to_rod: r.get(11)?,
+                        extruder_clearance_height_to_lid: r.get(12)?,
+                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

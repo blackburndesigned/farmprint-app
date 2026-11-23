@@ -13,3 +13,4 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 # Checks the plate's XML files are well-formed (already in the lockfile via Tauri).
 quick-xml = "0.42"
+serde_json = "1"

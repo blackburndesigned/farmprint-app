@@ -113,6 +113,24 @@ html[data-theme="light"] .fp-slot-swatch-empty { box-shadow: none; }
   padding: 5px 8px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--bg-elevated);
   color: var(--text-primary); font-size: 12px; outline: none;
 }
+.fp-feeder-edit-row select.fp-feeder-nozzle {
+  padding: 4px 6px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--bg-elevated);
+  color: var(--text-primary); font-size: 11.5px; outline: none;
+}
+.fp-feeder-edit-row select.fp-feeder-nozzle:disabled { opacity: 0.45; }
+.fp-feeder-edit-row:not(.fp-area-row) select.fp-feeder-nozzle { width: 88px; flex: 0 0 88px; }
 .fp-feeder-edit-row label { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; white-space: nowrap; }
 .fp-feeder-edit-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fp-feeder-edit-msg { font-size: 11px; color: var(--text-secondary); }
+
+/* Print areas editor (printer settings). Same row style as the feeder editor, in columns. */
+.fp-area-head, .fp-area-row { display: grid; grid-template-columns: minmax(96px, 1fr) 70px repeat(5, 58px) 28px; gap: 6px; align-items: center; }
+.fp-area-row { flex-wrap: nowrap; }
+.fp-area-head { font-size: 10.5px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.fp-area-head .fp-area-num { text-align: center; }
+.fp-area-row input.fp-area-name { min-width: 0; width: 100%; box-sizing: border-box; }
+.fp-area-row input.fp-area-num { width: 100%; box-sizing: border-box; padding: 5px 4px 5px 6px; }
+.fp-area-row select.fp-area-nozzle { width: 100%; }
+.fp-area-warn { font-size: 11px; color: #e8930c; }
+.fp-area-row input.fp-area-over { border-color: #e8930c; }
+.fp-feeder-editor .fp-btn:disabled { opacity: 0.5; cursor: default; }

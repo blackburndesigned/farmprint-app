@@ -3,6 +3,8 @@
 // backend (fp-mesh `plate`), so Print! and the plate view always agree. Plain TS so
 // scripts/tests can run it.
 
+import { partAreaOf, type PartArea } from "../printAreas";
+
 export type V2 = [number, number];
 export type V3 = [number, number, number];
 /** Quaternion [x, y, z, w]. */
@@ -17,9 +19,26 @@ export interface ArrangeSettings {
   auto_rotate: boolean;
   align_y: boolean;
   sequence: Sequence;
+  /** Max radius (printer field `extruder_clearance_radius`, else the default). */
   clearance_radius_mm: number;
+  /** Height to rod (printer field `extruder_clearance_height_to_rod`, else the default). */
   clearance_height_mm: number;
+  /** Distance to rod; null = not set (no front-to-back check). */
+  clearance_dist_to_rod_mm?: number | null;
+  /** Height to lid; null = no lid limit. */
+  clearance_height_to_lid_mm?: number | null;
 }
+
+/** What `printer_plate` remembers per printer. Clearance lives on the printer itself. */
+export const plateEntryOf = (s: ArrangeSettings) => ({ spacing_mm: s.spacing_mm, auto_rotate: s.auto_rotate, align_y: s.align_y, sequence: s.sequence });
+
+/** The printer's four clearance fields for `set_printer_extruder_clearance` (null = empty). */
+export const clearanceFieldsOf = (s: ArrangeSettings) => ({
+  extruder_clearance_radius: s.clearance_radius_mm,
+  extruder_clearance_dist_to_rod: s.clearance_dist_to_rod_mm ?? null,
+  extruder_clearance_height_to_rod: s.clearance_height_mm,
+  extruder_clearance_height_to_lid: s.clearance_height_to_lid_mm ?? null,
+});
 
 export const DEFAULT_SETTINGS: ArrangeSettings = {
   spacing_mm: 5,
@@ -28,6 +47,8 @@ export const DEFAULT_SETTINGS: ArrangeSettings = {
   sequence: "by_layer",
   clearance_radius_mm: 35,
   clearance_height_mm: 30,
+  clearance_dist_to_rod_mm: null,
+  clearance_height_to_lid_mm: null,
 };
 
 export interface BedSize {
@@ -54,14 +75,65 @@ export interface Placement {
   rot_deg: number;
 }
 
+/** Where a part may sit on a printer with print areas: `[x0, y0, x1, y1]` in bed mm. */
+export interface Reach {
+  rect: [number, number, number, number];
+  height_mm?: number | null;
+  /** Who reaches it: "Left nozzle", "Both nozzles", or an area's name. */
+  label: string;
+  /** No print area the part's nozzles reach exists (fp-core `PartArea::Unreachable`):
+   *  it is red, can't be sent, and is never treated as the whole bed. */
+  unreachable?: boolean;
+}
+
+/** Message for a part no nozzle area fits. */
+export const UNREACHABLE_MESSAGE = "No nozzle area fits this part";
+
+/** A reach from the printer settings' `PartArea` (printAreas.ts): null = the whole bed. */
+export function reachFromPartArea(a: PartArea): Reach | null {
+  if (a.kind === "unreachable") return { rect: [0, 0, 0, 0], height_mm: null, label: "No nozzle area", unreachable: true };
+  const area = partAreaOf(a);
+  if (!area) return null;
+  return { rect: [area.x_mm, area.y_mm, area.x_mm + area.width_mm, area.y_mm + area.depth_mm], height_mm: area.height_mm > 0 ? area.height_mm : null, label: area.name };
+}
+
+export interface AreaInfo {
+  name: string;
+  rect: [number, number, number, number];
+  height_mm?: number | null;
+  nozzle?: string | null;
+}
+
+/** A printer's print areas; `list` is empty for a printer without them (the whole bed). */
+export interface PlateAreas {
+  list: AreaInfo[];
+  /** Where every nozzle reaches (null without areas). */
+  shared: Reach | null;
+}
+
+export const NO_AREAS: PlateAreas = { list: [], shared: null };
+
+/** The area picked for a part: "auto" (by its nozzle), an area's name, or "shared". */
+export type AreaPick = string;
+export const AUTO_AREA: AreaPick = "auto";
+export const SHARED_AREA: AreaPick = "shared";
+
 export interface PlateCheck {
   plates: number;
   fits: boolean;
   off_plate: string[];
+  /** On the bed, but where the nozzle printing it can't reach. Absent from older backends. */
+  out_of_area?: string[];
+  /** Parts no nozzle area fits (also in `out_of_area`). */
+  unreachable?: string[];
   collisions: [string, string][];
   clearance_overlaps: [string, string][];
   too_tall: string[];
   taller_than_gantry: string[];
+  /** By object: tall pairs closer front to back than the distance to rod. */
+  rod_conflicts?: [string, string][];
+  /** By object: parts above the height to lid on a plate with more than one of them. */
+  over_lid?: string[];
   order: string[][];
   plate1_fill: number;
   tallest_mm: number;
@@ -79,6 +151,12 @@ export interface PlatePart {
   orientation: Quat;
   footprint: Footprint;
   placement: Placement;
+  /** Nozzle its filament's feeder is on ("left" / "right"), null when unknown. */
+  nozzle?: string | null;
+  /** Where it may sit when its area is Auto; null on a printer without areas. */
+  auto_reach?: Reach | null;
+  /** The area picked for it in the plate view; absent = Auto. */
+  area?: AreaPick;
 }
 
 export interface PlateMesh {
@@ -92,6 +170,7 @@ export interface PreparedPlate {
   bed: BedSize;
   settings: ArrangeSettings;
   check: PlateCheck;
+  areas?: PlateAreas;
 }
 
 export interface FaceCandidate {
@@ -110,11 +189,12 @@ export interface FitSummary {
   settings: ArrangeSettings;
   check: PlateCheck;
   outlines: { unit_id: string; hex: string; plate: number; outline: V2[] }[];
+  areas?: PlateAreas;
 }
 
 /** What Print! sends when the plate view was used (`layout` on transition_units). */
 export interface PrintLayout {
-  parts: { unit_id: string; orientation: Quat; placement: Placement }[];
+  parts: { unit_id: string; orientation: Quat; placement: Placement; area?: AreaPick }[];
   order: string[][];
 }
 
@@ -129,7 +209,53 @@ export function normalizeSettings(v: unknown): ArrangeSettings {
     sequence: o.sequence === "by_object" ? "by_object" : "by_layer",
     clearance_radius_mm: num(o.clearance_radius_mm, DEFAULT_SETTINGS.clearance_radius_mm, 500),
     clearance_height_mm: num(o.clearance_height_mm, DEFAULT_SETTINGS.clearance_height_mm, 1000),
+    clearance_dist_to_rod_mm: typeof o.clearance_dist_to_rod_mm === "number" ? num(o.clearance_dist_to_rod_mm, 0, 2000) : null,
+    clearance_height_to_lid_mm: typeof o.clearance_height_to_lid_mm === "number" && o.clearance_height_to_lid_mm > 0 ? num(o.clearance_height_to_lid_mm, 0, 2000) : null,
   };
+}
+
+// ---- print areas -----------------------------------------------------------------------
+
+/** Where a part may sit: its picked area, else its automatic reach; null = the whole bed. */
+export function reachOf(p: Pick<PlatePart, "area" | "auto_reach">, areas: PlateAreas): Reach | null {
+  if (!areas.list.length) return null;
+  const pick = (p.area ?? AUTO_AREA).trim();
+  if (pick && pick.toLowerCase() !== AUTO_AREA) {
+    const a = areas.list.find((x) => x.name.trim().toLowerCase() === pick.toLowerCase());
+    if (a) return { rect: a.rect, height_mm: a.height_mm ?? null, label: a.name };
+    if (pick.toLowerCase() === SHARED_AREA && areas.shared) return areas.shared;
+  }
+  return p.auto_reach ?? areas.shared;
+}
+
+/** The red-state message for a part outside its reach, e.g. "Right nozzle can't reach here". */
+export const outOfAreaMessage = (r: Reach | null) => (r?.unreachable ? UNREACHABLE_MESSAGE : `${r?.label || "The nozzle"} can't reach here`);
+
+/** True when the outline's bounding box leaves the rectangle. */
+export function outsideRect(o: V2[], r: [number, number, number, number], eps = 0.01): boolean {
+  const b = bbox(o);
+  return b[0] < r[0] - eps || b[1] < r[1] - eps || b[2] > r[2] + eps || b[3] > r[3] + eps;
+}
+
+/** Bed rectangles no area covers, and rectangles only some areas cover (one-nozzle strips),
+ *  for shading. Areas are axis-aligned, so cutting the bed on every area edge is exact. */
+export function areaShading(bed: BedSize, areas: PlateAreas): { none: [number, number, number, number][]; partial: [number, number, number, number][] } {
+  const none: [number, number, number, number][] = [];
+  const partial: [number, number, number, number][] = [];
+  if (!areas.list.length) return { none, partial };
+  const xs = [...new Set([0, bed.width_mm, ...areas.list.flatMap((a) => [a.rect[0], a.rect[2]])])].filter((v) => v >= 0 && v <= bed.width_mm).sort((a, b) => a - b);
+  const ys = [...new Set([0, bed.depth_mm, ...areas.list.flatMap((a) => [a.rect[1], a.rect[3]])])].filter((v) => v >= 0 && v <= bed.depth_mm).sort((a, b) => a - b);
+  for (let i = 0; i + 1 < xs.length; i++) {
+    for (let j = 0; j + 1 < ys.length; j++) {
+      const cx = (xs[i] + xs[i + 1]) / 2;
+      const cy = (ys[j] + ys[j + 1]) / 2;
+      const n = areas.list.filter((a) => cx > a.rect[0] && cx < a.rect[2] && cy > a.rect[1] && cy < a.rect[3]).length;
+      const cell: [number, number, number, number] = [xs[i], ys[j], xs[i + 1], ys[j + 1]];
+      if (n === 0) none.push(cell);
+      else if (n < areas.list.length) partial.push(cell);
+    }
+  }
+  return { none, partial };
 }
 
 // ---- 2D geometry ------------------------------------------------------------------------
@@ -199,25 +325,41 @@ export function offsetOutline(h: V2[], r: number, seg = 10): V2[] {
   return pts;
 }
 
-/** Live checks while dragging: ids that leave the bed or overlap another part. */
-export function liveProblems(parts: PlatePart[], plate: number, bed: BedSize): { off: Set<string>; hit: Set<string> } {
+export interface LiveProblems {
+  off: Set<string>;
+  hit: Set<string>;
+  /** On the bed but where its nozzle can't reach. */
+  out: Set<string>;
+}
+
+/** Live checks while dragging: ids that leave the bed, leave their print area, or overlap another part. */
+export function liveProblems(parts: PlatePart[], plate: number, bed: BedSize, areas: PlateAreas = NO_AREAS): LiveProblems {
   const on = parts.filter((p) => p.placement.plate === plate);
   const polys = on.map(placedOutline);
   const off = new Set<string>();
   const hit = new Set<string>();
+  const out = new Set<string>();
   on.forEach((p, i) => {
-    const b = bbox(polys[i]);
-    if (b[0] < -0.01 || b[1] < -0.01 || b[2] > bed.width_mm + 0.01 || b[3] > bed.depth_mm + 0.01) off.add(p.unit_id);
+    const reach = reachOf(p, areas);
+    // No nozzle area fits it: red wherever it is (it waits beside the bed after Arrange).
+    if (reach?.unreachable) out.add(p.unit_id);
+    else if (outsideRect(polys[i], [0, 0, bed.width_mm, bed.depth_mm])) off.add(p.unit_id);
+    else {
+      const r = reachOf(p, areas);
+      if (r && outsideRect(polys[i], r.rect)) out.add(p.unit_id);
+    }
   });
   for (let i = 0; i < on.length; i++) {
     for (let j = i + 1; j < on.length; j++) {
+      if (out.has(on[i].unit_id) && reachOf(on[i], areas)?.unreachable) continue;
+      if (out.has(on[j].unit_id) && reachOf(on[j], areas)?.unreachable) continue;
       if (convexOverlap(polys[i], polys[j])) {
         hit.add(on[i].unit_id);
         hit.add(on[j].unit_id);
       }
     }
   }
-  return { off, hit };
+  return { off, hit, out };
 }
 
 // ---- quaternions -----------------------------------------------------------------------
@@ -355,19 +497,23 @@ export function effectiveOrder(parts: PlatePart[], user: string[][] | null, from
 
 export function layoutFor(parts: PlatePart[], order: string[][]): PrintLayout {
   return {
-    parts: parts.map((p) => ({ unit_id: p.unit_id, orientation: p.orientation, placement: p.placement })),
+    parts: parts.map((p) => ({ unit_id: p.unit_id, orientation: p.orientation, placement: p.placement, ...(p.area && p.area !== AUTO_AREA ? { area: p.area } : {}) })),
     order,
   };
 }
 
 /** Status line headline for a check. */
-export function fitHeadline(c: Pick<PlateCheck, "fits" | "plates" | "off_plate" | "collisions" | "too_tall">, bigger?: number): {
+export function fitHeadline(c: Pick<PlateCheck, "fits" | "plates" | "off_plate" | "collisions" | "too_tall" | "out_of_area" | "unreachable">, bigger?: number): {
   tone: "ok" | "warn" | "bad";
   text: string;
 } {
+  const none = c.unreachable?.length ?? 0;
+  if (none) return { tone: "bad", text: none === 1 ? UNREACHABLE_MESSAGE : `No nozzle area fits ${none} parts` };
   if (c.too_tall.length) return { tone: "bad", text: `${c.too_tall.length} too tall for this printer` };
   if (bigger) return { tone: "bad", text: `${bigger} bigger than the bed` };
   if (c.off_plate.length) return { tone: "bad", text: `${c.off_plate.length} off the plate` };
+  const out = c.out_of_area?.length ?? 0;
+  if (out) return { tone: "bad", text: `${out} where ${out === 1 ? "its nozzle" : "their nozzles"} can't reach` };
   if (c.collisions.length) return { tone: "bad", text: `${new Set(c.collisions.flat()).size} parts overlap` };
   if (c.plates > 1) return { tone: "warn", text: `Needs ${c.plates} plates` };
   return { tone: "ok", text: "Fits on one plate" };

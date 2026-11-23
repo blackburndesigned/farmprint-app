@@ -1096,6 +1096,8 @@ impl ShopLedger {
                 AND printer_id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL));
             DELETE FROM printer_feeders WHERE printer_id GLOB 'sample-*'
               AND printer_id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL);
+            DELETE FROM printer_print_areas WHERE printer_id GLOB 'sample-*'
+              AND printer_id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL);
             DELETE FROM printers WHERE id GLOB 'sample-*'
               AND id NOT IN (SELECT printer_id FROM part_units WHERE printer_id IS NOT NULL);
             DELETE FROM filaments WHERE id GLOB 'sample-*'

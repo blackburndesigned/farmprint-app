@@ -321,10 +321,17 @@ pub struct ArrangeSettings {
     pub auto_rotate: bool,
     pub align_y: bool,
     pub sequence: Sequence,
-    /// Radius around the nozzle that must stay clear of finished parts (by object).
+    /// Max radius: around the nozzle, must stay clear of finished parts (by object).
     pub clearance_radius_mm: f64,
-    /// Nozzle tip to the lowest part of the gantry (by object).
+    /// Height to rod: nozzle tip to the lowest part of the gantry (by object).
+    #[serde(alias = "clearance_height_to_rod_mm")]
     pub clearance_height_mm: f64,
+    /// Distance to rod: parts taller than the height to rod need this much room front to
+    /// back (Y, along which the gantry rod sweeps) from each other. None = the max radius.
+    pub clearance_dist_to_rod_mm: Option<f64>,
+    /// Height to lid: every part but the last printed on a plate must be lower than this;
+    /// the last may use the full build height. None = no lid limit.
+    pub clearance_height_to_lid_mm: Option<f64>,
 }
 
 pub const DEFAULT_SPACING_MM: f64 = 5.0;
@@ -341,6 +348,8 @@ impl Default for ArrangeSettings {
             sequence: Sequence::ByLayer,
             clearance_radius_mm: DEFAULT_CLEARANCE_RADIUS_MM,
             clearance_height_mm: DEFAULT_CLEARANCE_HEIGHT_MM,
+            clearance_dist_to_rod_mm: None,
+            clearance_height_to_lid_mm: None,
         }
     }
 }
@@ -353,6 +362,33 @@ impl ArrangeSettings {
             Sequence::ByLayer => s,
             Sequence::ByObject => s.max(self.clearance_radius_mm.max(0.0)),
         }
+    }
+
+    /// Distance to rod in effect (by object only); None when the printer has none set,
+    /// which skips the front-to-back check.
+    pub fn dist_to_rod(&self) -> Option<f64> {
+        if self.sequence != Sequence::ByObject {
+            return None;
+        }
+        self.clearance_dist_to_rod_mm.filter(|v| v.is_finite() && *v >= 0.0)
+    }
+
+    /// Height to lid in effect (by object only).
+    pub fn height_to_lid(&self) -> Option<f64> {
+        if self.sequence != Sequence::ByObject {
+            return None;
+        }
+        self.clearance_height_to_lid_mm.filter(|v| v.is_finite() && *v > 0.0)
+    }
+
+    /// By object: taller than the height to rod.
+    pub fn above_rod(&self, height: f64) -> bool {
+        self.sequence == Sequence::ByObject && height > self.clearance_height_mm + 0.01
+    }
+
+    /// By object: taller than the height to lid (so it must print last on its plate).
+    pub fn above_lid(&self, height: f64) -> bool {
+        self.height_to_lid().is_some_and(|l| height > l + 0.01)
     }
 }
 
@@ -375,6 +411,141 @@ pub struct Placement {
     pub rot_deg: f64,
 }
 
+/// Where one part may sit on a printer with print areas: a rectangle on the bed
+/// `[x0, y0, x1, y1]` (mm) and the build height there. `label` names who reaches it
+/// ("Left nozzle", "Both nozzles", or an area's name) for messages.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Reach {
+    pub rect: [f64; 4],
+    #[serde(default)]
+    pub height_mm: Option<f64>,
+    #[serde(default)]
+    pub label: String,
+    /// No print area the part's nozzles reach exists: it can't print on this printer.
+    /// Arrange leaves it beside the bed and check flags it; never the whole bed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unreachable: bool,
+}
+
+/// Message for a part no nozzle area fits.
+pub const UNREACHABLE_MESSAGE: &str = "No nozzle area fits this part";
+
+impl Reach {
+    /// The reach of a part no print area fits.
+    pub fn unreachable() -> Self {
+        Reach { rect: [0.0; 4], height_mm: None, label: "No nozzle area".into(), unreachable: true }
+    }
+}
+
+/// One print area as the printer settings give it (origin = front-left corner, bed mm).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PrintAreaSpec {
+    #[serde(default)]
+    pub name: String,
+    pub x_mm: f64,
+    pub y_mm: f64,
+    pub width_mm: f64,
+    pub depth_mm: f64,
+    #[serde(default)]
+    pub height_mm: Option<f64>,
+    /// "left" / "right" / "both"; None = read from the name ("Left nozzle"), else no nozzle.
+    #[serde(default)]
+    pub nozzle: Option<String>,
+}
+
+impl PrintAreaSpec {
+    pub fn rect(&self) -> [f64; 4] {
+        [self.x_mm, self.y_mm, self.x_mm + self.width_mm, self.y_mm + self.depth_mm]
+    }
+
+    /// The nozzle this area is for: the explicit field, or a name that says exactly one
+    /// of "left" / "right".
+    pub fn nozzle_side(&self) -> Option<String> {
+        if let Some(n) = self.nozzle.as_deref().map(|n| n.trim().to_ascii_lowercase()) {
+            // Set explicitly ("left" / "right" / "both"): the name doesn't matter.
+            return (n == "left" || n == "right").then_some(n);
+        }
+        let name = self.name.to_ascii_lowercase();
+        match (name.contains("left"), name.contains("right")) {
+            (true, false) => Some("left".into()),
+            (false, true) => Some("right".into()),
+            _ => None,
+        }
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Where every nozzle reaches: the overlap of all areas, the lowest height among them.
+/// None when there are no areas; an empty rectangle when they don't overlap.
+pub fn shared_reach(areas: &[PrintAreaSpec]) -> Option<Reach> {
+    let first = areas.first()?;
+    let mut r = first.rect();
+    let mut h = first.height_mm;
+    for a in &areas[1..] {
+        let b = a.rect();
+        r = [r[0].max(b[0]), r[1].max(b[1]), r[2].min(b[2]), r[3].min(b[3])];
+        h = match (h, a.height_mm) {
+            (Some(x), Some(y)) => Some(x.min(y)),
+            (x, y) => x.or(y),
+        };
+    }
+    let sides: std::collections::BTreeSet<String> = areas.iter().filter_map(|a| a.nozzle_side()).collect();
+    let label = if sides.len() >= 2 { "Both nozzles".to_string() } else { "Every area".to_string() };
+    Some(Reach { rect: r, height_mm: h, label, unreachable: false })
+}
+
+/// Where a part printed by `nozzles` may sit. One known nozzle with its own area: that
+/// area. Both nozzles, an unknown one, or no area for it: where every nozzle reaches.
+/// None when the printer has no areas (the whole bed, as before areas).
+pub fn reach_for_nozzles(areas: &[PrintAreaSpec], nozzles: &[Option<String>]) -> Option<Reach> {
+    if areas.is_empty() {
+        return None;
+    }
+    let mut sides: Vec<String> = Vec::new();
+    for n in nozzles {
+        match n.as_deref().map(|n| n.trim().to_ascii_lowercase()) {
+            Some(n) if n == "left" || n == "right" => {
+                if !sides.contains(&n) {
+                    sides.push(n);
+                }
+            }
+            _ => return shared_reach(areas),
+        }
+    }
+    if sides.len() == 1 {
+        let side = &sides[0];
+        let own: Vec<&PrintAreaSpec> = areas.iter().filter(|a| a.nozzle_side().as_deref() == Some(side.as_str())).collect();
+        if let Some(a) = own.first() {
+            return Some(Reach {
+                rect: a.rect(),
+                height_mm: a.height_mm,
+                label: format!("{} nozzle", capitalize(side)),
+                unreachable: false,
+            });
+        }
+    }
+    shared_reach(areas)
+}
+
+/// The area the user picked by name (or "both"/"shared" for where every nozzle reaches).
+pub fn reach_for_area_name(areas: &[PrintAreaSpec], name: &str) -> Option<Reach> {
+    let n = name.trim();
+    if let Some(a) = areas.iter().find(|a| a.name.trim().eq_ignore_ascii_case(n)) {
+        return Some(Reach { rect: a.rect(), height_mm: a.height_mm, label: a.name.trim().to_string(), unreachable: false });
+    }
+    if n.eq_ignore_ascii_case("shared") || n.eq_ignore_ascii_case("both") {
+        return shared_reach(areas);
+    }
+    None
+}
+
 /// One part to arrange: its oriented outline, its height, its current turn about Z (kept
 /// when auto-rotate is off), and an optional fixed spot (the user dragged it there).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -385,6 +556,9 @@ pub struct ArrangeItem {
     pub rot_deg: f64,
     #[serde(default)]
     pub pinned: Option<Placement>,
+    /// Where it may sit on a printer with print areas; None = anywhere on the bed.
+    #[serde(default)]
+    pub reach: Option<Reach>,
 }
 
 impl ArrangeItem {
@@ -394,6 +568,29 @@ impl ArrangeItem {
             height: f.height,
             rot_deg: 0.0,
             pinned: None,
+            reach: None,
+        }
+    }
+
+    /// The rectangle it may sit in on `bed`: its reach clipped to the bed, or the bed.
+    pub fn allowed_rect(&self, bed: &BedSize) -> [f64; 4] {
+        let full = [0.0, 0.0, bed.width_mm, bed.depth_mm];
+        match &self.reach {
+            Some(r) => [r.rect[0].max(0.0), r.rect[1].max(0.0), r.rect[2].min(full[2]), r.rect[3].min(full[3])],
+            None => full,
+        }
+    }
+
+    /// True when no print area fits it (see [`Reach::unreachable`]).
+    pub fn is_unreachable(&self) -> bool {
+        self.reach.as_ref().is_some_and(|r| r.unreachable)
+    }
+
+    /// Build height where it may sit: the lower of the bed's and its area's.
+    pub fn height_limit(&self, bed: &BedSize) -> Option<f64> {
+        match (bed.height_mm, self.reach.as_ref().and_then(|r| r.height_mm)) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         }
     }
 }
@@ -544,10 +741,10 @@ fn strictly_inside(p: V2, poly: &[V2]) -> bool {
     true
 }
 
-fn fits_on_empty_bed(hull: &[V2], rots: &[f64], bed: &BedSize) -> bool {
+fn fits_on_empty_bed(hull: &[V2], rots: &[f64], area: [f64; 4]) -> bool {
     rots.iter().any(|&r| {
         let b = bbox_2d(&transform_2d(hull, r, 0.0, 0.0));
-        b[2] - b[0] <= bed.width_mm + 1e-6 && b[3] - b[1] <= bed.depth_mm + 1e-6
+        b[2] - b[0] <= area[2] - area[0] + 1e-6 && b[3] - b[1] <= area[3] - area[1] + 1e-6
     })
 }
 
@@ -595,9 +792,14 @@ fn best_spot(
     hull: &[V2],
     rots: &[f64],
     placed: &[Placed],
-    bed: &BedSize,
+    area: [f64; 4],
     step: f64,
+    bands: &[[f64; 2]],
 ) -> Option<(Placement, Vec<V2>)> {
+    // By object, tall parts: Y ranges (already grown by the distance to rod) this part's
+    // outline may not enter.
+    let clear_of_bands = |y0: f64, y1: f64| bands.iter().all(|b| y1 <= b[0] + 1e-9 || y0 >= b[1] - 1e-9);
+    let (aw, ad) = (area[2] - area[0], area[3] - area[1]);
     let pile = union_bb(placed);
     let mut best: Option<(f64, Placement)> = None;
     for &r in rots {
@@ -605,10 +807,10 @@ fn best_spot(
         let b = bbox_2d(&h0);
         // The simplified outline can sit up to SIMPLIFY_MM inside the real one: keep that
         // much from the bed edges too (less only when the part barely fits).
-        let mx = edge_margin(bed.width_mm - (b[2] - b[0]));
-        let my = edge_margin(bed.depth_mm - (b[3] - b[1]));
-        let (x0, x1) = (-b[0] + mx, bed.width_mm - b[2] - mx);
-        let (y0, y1) = (-b[1] + my, bed.depth_mm - b[3] - my);
+        let mx = edge_margin(aw - (b[2] - b[0]));
+        let my = edge_margin(ad - (b[3] - b[1]));
+        let (x0, x1) = (area[0] - b[0] + mx, area[2] - b[2] - mx);
+        let (y0, y1) = (area[1] - b[1] + my, area[3] - b[3] - my);
         if x1 < x0 - 1e-9 || y1 < y0 - 1e-9 {
             continue;
         }
@@ -617,6 +819,16 @@ fn best_spot(
         // Candidates: a grid over the bed, the bed corners, and every no-fit vertex (spots
         // touching a placed part at exactly the gap).
         let mut cands: Vec<V2> = vec![[x0, y0], [x1, y0], [x0, y1], [x1, y1]];
+        for bd in bands {
+            for y in [bd[1] - b[1], bd[0] - b[3]] {
+                if y >= y0 - 1e-9 && y <= y1 + 1e-9 {
+                    let y = y.clamp(y0, y1);
+                    cands.push([x0, y]);
+                    cands.push([x1, y]);
+                    cands.push([(x0 + x1) / 2.0, y]);
+                }
+            }
+        }
         for n in &nfps {
             for v in &n.poly {
                 if v[0] >= x0 - 1e-9 && v[0] <= x1 + 1e-9 && v[1] >= y0 - 1e-9 && v[1] <= y1 + 1e-9 {
@@ -646,7 +858,7 @@ fn best_spot(
                     continue;
                 }
             }
-            if free_at(&nfps, x, y) {
+            if clear_of_bands(y + b[1], y + b[3]) && free_at(&nfps, x, y) {
                 best = Some((score, Placement { plate: 0, x, y, rot_deg: r }));
             }
         }
@@ -656,8 +868,13 @@ fn best_spot(
     let h0 = transform_2d(hull, p.rot_deg, 0.0, 0.0);
     let b = bbox_2d(&h0);
     let nfps = nfps_for(&h0, placed);
-    let (mx, my) = (edge_margin(bed.width_mm - (b[2] - b[0])), edge_margin(bed.depth_mm - (b[3] - b[1])));
-    let ok = |x: f64, y: f64| x + b[0] >= mx - 1e-9 && y + b[1] >= my - 1e-9 && free_at(&nfps, x, y);
+    let (mx, my) = (edge_margin(aw - (b[2] - b[0])), edge_margin(ad - (b[3] - b[1])));
+    let ok = |x: f64, y: f64| {
+        x + b[0] >= area[0] + mx - 1e-9
+            && y + b[1] >= area[1] + my - 1e-9
+            && clear_of_bands(y + b[1], y + b[3])
+            && free_at(&nfps, x, y)
+    };
     let mut fine = step / 2.0;
     while fine >= 0.125 {
         loop {
@@ -704,6 +921,11 @@ pub fn arrange(items: &[ArrangeItem], bed: &BedSize, s: &ArrangeSettings) -> Vec
     };
     for (i, it) in items.iter().enumerate() {
         if let Some(p) = it.pinned {
+            if it.is_unreachable() {
+                // It can't print here: keep where it was put, but it holds no room.
+                out[i] = Some(p);
+                continue;
+            }
             ensure(&mut plates, &mut plate_has_pin, p.plate);
             let poly = transform_2d(&simplify_convex(&it.hull, SIMPLIFY_MM), p.rot_deg, p.x, p.y);
             plates[p.plate].push(Placed::new(poly, gap));
@@ -712,23 +934,62 @@ pub fn arrange(items: &[ArrangeItem], bed: &BedSize, s: &ArrangeSettings) -> Vec
         }
     }
     ensure(&mut plates, &mut plate_has_pin, 0);
-    let mut order: Vec<usize> = (0..items.len()).filter(|&i| items[i].pinned.is_none()).collect();
+    // Parts no nozzle area fits are not placed on any plate: they wait beside the bed
+    // (left of it, plate 1) and check flags them.
+    let mut beside = 0.0;
+    for (i, it) in items.iter().enumerate() {
+        if it.pinned.is_none() && it.is_unreachable() {
+            let b = bbox_2d(&it.hull);
+            beside += (b[2] - b[0]) + 10.0;
+            out[i] = Some(Placement { plate: 0, x: -beside + (b[2] - b[0]) / 2.0 - (b[0] + b[2]) / 2.0, y: bed.depth_mm / 2.0 - (b[1] + b[3]) / 2.0, rot_deg: 0.0 });
+        }
+    }
+    let mut order: Vec<usize> = (0..items.len()).filter(|&i| items[i].pinned.is_none() && !items[i].is_unreachable()).collect();
+    let rects: Vec<[f64; 4]> = items.iter().map(|it| it.allowed_rect(bed)).collect();
+    let rect_area = |r: [f64; 4]| (r[2] - r[0]).max(0.0) * (r[3] - r[1]).max(0.0);
+    let any_reach = items.iter().any(|it| it.reach.is_some());
+    // Parts that may sit in less of the bed go first (with print areas: parts that need
+    // both nozzles take the shared strip before one-nozzle parts fill around them).
     order.sort_by(|&a, &b| {
-        polygon_area(&items[b].hull)
-            .total_cmp(&polygon_area(&items[a].hull))
+        rect_area(rects[a])
+            .total_cmp(&rect_area(rects[b]))
+            .then(polygon_area(&items[b].hull).total_cmp(&polygon_area(&items[a].hull)))
             .then(items[b].height.total_cmp(&items[a].height))
             .then(a.cmp(&b))
     });
     let step = (bed.width_mm.min(bed.depth_mm) / 64.0).clamp(2.0, 8.0);
     let mut members: Vec<Vec<usize>> = vec![Vec::new(); plates.len()];
+    // By object: per plate, Y ranges of parts above the rod, and whether a part above the
+    // lid is already there (only one may be, printed last).
+    let rod_dist = s.dist_to_rod();
+    let rod = rod_dist.unwrap_or(0.0);
+    let above_rod = |h: f64| rod_dist.is_some() && s.above_rod(h);
+    let mut rod_bands: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut lid_used: Vec<bool> = Vec::new();
+    for it in items {
+        if let Some(p) = it.pinned {
+            if rod_bands.len() <= p.plate {
+                rod_bands.resize(p.plate + 1, Vec::new());
+                lid_used.resize(p.plate + 1, false);
+            }
+            if above_rod(it.height) {
+                let b = bbox_2d(&placed_outline(it, &p));
+                rod_bands[p.plate].push([b[1] - rod, b[3] + rod]);
+            }
+            if s.above_lid(it.height) {
+                lid_used[p.plate] = true;
+            }
+        }
+    }
     for idx in order {
         let it = &items[idx];
         let rots = rotations_for(it, s);
-        if !fits_on_empty_bed(&it.hull, &rots, bed) {
+        let area = rects[idx];
+        if area[2] - area[0] <= 0.0 || area[3] - area[1] <= 0.0 || !fits_on_empty_bed(&it.hull, &rots, area) {
             out[idx] = Some(Placement {
                 plate: 0,
-                x: bed.width_mm / 2.0,
-                y: bed.depth_mm / 2.0,
+                x: (area[0] + area[2]) / 2.0,
+                y: (area[1] + area[3]) / 2.0,
                 rot_deg: rots[0],
             });
             continue;
@@ -740,7 +1001,27 @@ pub fn arrange(items: &[ArrangeItem], bed: &BedSize, s: &ArrangeSettings) -> Vec
             if members.len() <= pi {
                 members.resize(pi + 1, Vec::new());
             }
-            if let Some((pl, poly)) = best_spot(&simple, &rots, &plates[pi], bed, step) {
+            if rod_bands.len() <= pi {
+                rod_bands.resize(pi + 1, Vec::new());
+                lid_used.resize(pi + 1, false);
+            }
+            let tall = above_rod(it.height);
+            let over_lid = s.above_lid(it.height);
+            if over_lid && lid_used[pi] {
+                pi += 1;
+                continue;
+            }
+            let no_bands: [[f64; 2]; 0] = [];
+            let bands: &[[f64; 2]] = if tall { &rod_bands[pi] } else { &no_bands };
+            if let Some((pl, poly)) = best_spot(&simple, &rots, &plates[pi], area, step, bands) {
+                if tall {
+                    let b = bbox_2d(&poly);
+                    // The real outline can sit up to SIMPLIFY_MM outside the simplified one.
+                    rod_bands[pi].push([b[1] - rod - SIMPLIFY_MM, b[3] + rod + SIMPLIFY_MM]);
+                }
+                if over_lid {
+                    lid_used[pi] = true;
+                }
                 out[idx] = Some(Placement { plate: pi, ..pl });
                 plates[pi].push(Placed::new(poly, gap));
                 members[pi].push(idx);
@@ -755,8 +1036,23 @@ pub fn arrange(items: &[ArrangeItem], bed: &BedSize, s: &ArrangeSettings) -> Vec
             continue;
         }
         let Some(u) = union_bb(&plates[pi]) else { continue };
-        let dx = bed.width_mm / 2.0 - (u[0] + u[2]) / 2.0;
-        let dy = bed.depth_mm / 2.0 - (u[1] + u[3]) / 2.0;
+        let mut dx = bed.width_mm / 2.0 - (u[0] + u[2]) / 2.0;
+        let mut dy = bed.depth_mm / 2.0 - (u[1] + u[3]) / 2.0;
+        if any_reach {
+            // Keep every part inside its own area while centring.
+            let (mut lx, mut hx, mut ly, mut hy) = (f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY);
+            for &i in list {
+                let Some(p) = out[i] else { continue };
+                let b = bbox_2d(&placed_outline(&items[i], &p));
+                let r = rects[i];
+                lx = lx.max(r[0] - b[0]);
+                hx = hx.min(r[2] - b[2]);
+                ly = ly.max(r[1] - b[1]);
+                hy = hy.min(r[3] - b[3]);
+            }
+            dx = if lx <= hx { dx.clamp(lx, hx) } else { 0.0 };
+            dy = if ly <= hy { dy.clamp(ly, hy) } else { 0.0 };
+        }
         for &i in list {
             if let Some(p) = out[i].as_mut() {
                 p.x += dx;
@@ -779,10 +1075,25 @@ pub struct PlateCheck {
     pub collisions: Vec<[usize; 2]>,
     /// By object: pairs closer than the clearance radius.
     pub clearance_overlaps: Vec<[usize; 2]>,
-    /// Items taller than the printer's build height (only when it is set).
+    /// Items taller than the printer's build height, or their print area's height.
     pub too_tall: Vec<usize>,
-    /// By object: items taller than the gantry clearance (allowed once per plate, last).
+    /// Items on the bed but outside the print area that can print them, and every item no
+    /// nozzle area fits (those are also in `unreachable`).
+    #[serde(default)]
+    pub out_of_area: Vec<usize>,
+    /// Items no print area fits on this printer (they can't be sent).
+    #[serde(default)]
+    pub unreachable: Vec<usize>,
+    /// By object: items taller than the height to rod (they print last, back to front).
     pub taller_than_gantry: Vec<usize>,
+    /// By object: pairs of items above the height to rod closer front to back (Y) than the
+    /// distance to rod; the gantry rod would hit the one printed first.
+    #[serde(default)]
+    pub rod_conflicts: Vec<[usize; 2]>,
+    /// By object: items above the height to lid on a plate that has more than one of them
+    /// (only the last printed may go above the lid).
+    #[serde(default)]
+    pub over_lid: Vec<usize>,
     /// By object: print order per plate, item indices.
     pub order: Vec<Vec<usize>>,
     /// Share of plate 1 covered by outlines, 0..1.
@@ -793,7 +1104,13 @@ pub struct PlateCheck {
 impl PlateCheck {
     /// True when every part is on a plate, nothing overlaps, and nothing is too tall.
     pub fn fits(&self) -> bool {
-        self.off_plate.is_empty() && self.collisions.is_empty() && self.too_tall.is_empty()
+        self.off_plate.is_empty()
+            && self.collisions.is_empty()
+            && self.too_tall.is_empty()
+            && self.out_of_area.is_empty()
+            && self.unreachable.is_empty()
+            && self.rod_conflicts.is_empty()
+            && self.over_lid.is_empty()
     }
 }
 
@@ -812,22 +1129,32 @@ pub fn check(items: &[ArrangeItem], placements: &[Placement], bed: &BedSize, s: 
     let eps = 0.01;
     for i in 0..n {
         let b = bbs[i];
+        if items[i].is_unreachable() {
+            c.unreachable.push(i);
+            c.out_of_area.push(i);
+            continue;
+        }
         if b[0] < -eps || b[1] < -eps || b[2] > bed.width_mm + eps || b[3] > bed.depth_mm + eps {
             c.off_plate.push(i);
+        } else if items[i].reach.is_some() {
+            let r = items[i].allowed_rect(bed);
+            if b[0] < r[0] - eps || b[1] < r[1] - eps || b[2] > r[2] + eps || b[3] > r[3] + eps {
+                c.out_of_area.push(i);
+            }
         }
-        if let Some(h) = bed.height_mm {
+        if let Some(h) = items[i].height_limit(bed) {
             if items[i].height > h + eps {
                 c.too_tall.push(i);
             }
         }
         c.tallest_mm = c.tallest_mm.max(items[i].height);
-        if s.sequence == Sequence::ByObject && items[i].height > s.clearance_height_mm + eps {
+        if s.above_rod(items[i].height) {
             c.taller_than_gantry.push(i);
         }
     }
     for i in 0..n {
         for j in i + 1..n {
-            if placements[i].plate != placements[j].plate {
+            if placements[i].plate != placements[j].plate || items[i].is_unreachable() || items[j].is_unreachable() {
                 continue;
             }
             let d = convex_distance(&polys[i], &polys[j]);
@@ -836,6 +1163,13 @@ pub fn check(items: &[ArrangeItem], placements: &[Placement], bed: &BedSize, s: 
             }
             if s.sequence == Sequence::ByObject && d < s.clearance_radius_mm - eps {
                 c.clearance_overlaps.push([i, j]);
+            }
+            if let Some(rod) = s.dist_to_rod().filter(|_| s.above_rod(items[i].height) && s.above_rod(items[j].height)) {
+                let (a, b) = (bbs[i], bbs[j]);
+                let gap = (b[1] - a[3]).max(a[1] - b[3]);
+                if gap < rod - eps {
+                    c.rod_conflicts.push([i, j]);
+                }
             }
         }
     }
@@ -848,6 +1182,15 @@ pub fn check(items: &[ArrangeItem], placements: &[Placement], bed: &BedSize, s: 
     } else {
         0.0
     };
+    if s.height_to_lid().is_some() {
+        let plates = c.plates;
+        for pl in 0..plates {
+            let over: Vec<usize> = (0..n).filter(|&i| placements[i].plate == pl && s.above_lid(items[i].height)).collect();
+            if over.len() > 1 {
+                c.over_lid.extend(over);
+            }
+        }
+    }
     if s.sequence == Sequence::ByObject {
         c.order = object_order(items, placements, s);
     }
@@ -884,7 +1227,10 @@ pub fn object_order(items: &[ArrangeItem], placements: &[Placement], s: &Arrange
             idx.sort_by(|&a, &b| {
                 let ta = items[a].height > s.clearance_height_mm;
                 let tb = items[b].height > s.clearance_height_mm;
-                ta.cmp(&tb)
+                // Above the lid prints very last; above the rod after the rest.
+                s.above_lid(items[a].height)
+                    .cmp(&s.above_lid(items[b].height))
+                    .then(ta.cmp(&tb))
                     .then((-(placements[a].y / row).round()).total_cmp(&(-(placements[b].y / row).round())))
                     .then(placements[a].x.total_cmp(&placements[b].x))
             });
@@ -1320,9 +1666,25 @@ pub fn auto_layout(
     bed: &BedSize,
     s: &ArrangeSettings,
 ) -> (Vec<PlannedPart>, PlateCheck) {
+    auto_layout_with_reach(meshes, orientations, &[], bed, s)
+}
+
+/// `auto_layout` where each part (index-aligned with `meshes`) may have its own reach on a
+/// printer with print areas; a missing entry or None is the whole bed.
+pub fn auto_layout_with_reach(
+    meshes: &[&TriangleMesh],
+    orientations: &[Quat],
+    reaches: &[Option<Reach>],
+    bed: &BedSize,
+    s: &ArrangeSettings,
+) -> (Vec<PlannedPart>, PlateCheck) {
     let q_of = |i: usize| orientations.get(i).copied().map(quat_normalize).unwrap_or(IDENTITY);
     let feet: Vec<Footprint> = meshes.iter().enumerate().map(|(i, m)| footprint(m, q_of(i))).collect();
-    let items: Vec<ArrangeItem> = feet.iter().map(ArrangeItem::from_footprint).collect();
+    let items: Vec<ArrangeItem> = feet
+        .iter()
+        .enumerate()
+        .map(|(i, f)| ArrangeItem { reach: reaches.get(i).cloned().flatten(), ..ArrangeItem::from_footprint(f) })
+        .collect();
     let placements = arrange(&items, bed, s);
     let c = check(&items, &placements, bed, s);
     let parts = feet
@@ -1434,7 +1796,7 @@ mod tests {
             })
             .collect();
         let items: Vec<ArrangeItem> = (0..6)
-            .map(|_| ArrangeItem { hull: disc.clone(), height: 5.0, rot_deg: 0.0, pinned: None })
+            .map(|_| ArrangeItem { hull: disc.clone(), height: 5.0, rot_deg: 0.0, pinned: None, reach: None })
             .collect();
         let bed = BedSize { width_mm: 256.0, depth_mm: 256.0, height_mm: None };
         let s = ArrangeSettings::default();
@@ -1448,7 +1810,7 @@ mod tests {
         vec![[-w / 2.0, -d / 2.0], [w / 2.0, -d / 2.0], [w / 2.0, d / 2.0], [-w / 2.0, d / 2.0]]
     }
     fn item(w: f64, d: f64) -> ArrangeItem {
-        ArrangeItem { hull: rect(w, d), height: 10.0, rot_deg: 0.0, pinned: None }
+        ArrangeItem { hull: rect(w, d), height: 10.0, rot_deg: 0.0, pinned: None, reach: None }
     }
     fn bed(w: f64, d: f64) -> BedSize {
         BedSize { width_mm: w, depth_mm: d, height_mm: None }
@@ -1468,6 +1830,289 @@ mod tests {
             [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7],
         ];
         TriangleMesh { name: "box".into(), positions: p, indices: i }
+    }
+
+    // ---- print areas ----------------------------------------------------------------------
+    // Test data only, not any printer's real numbers: a 325 x 320 mm bed where the left
+    // nozzle reaches 325 x 320 x 320 from x = 0, the right nozzle 305 x 320 x 325 from
+    // x = 20, and an explicit "Both" area of 300 x 320 x 320 from x = 20 (so x 20..320).
+
+    fn dual_areas() -> Vec<PrintAreaSpec> {
+        let a = |name: &str, x: f64, w: f64, h: f64| PrintAreaSpec {
+            name: name.into(),
+            x_mm: x,
+            y_mm: 0.0,
+            width_mm: w,
+            depth_mm: 320.0,
+            height_mm: Some(h),
+            nozzle: None,
+        };
+        vec![a("Left nozzle", 0.0, 325.0, 320.0), a("Right nozzle", 20.0, 305.0, 325.0), a("Both", 20.0, 300.0, 320.0)]
+    }
+    fn dual_bed() -> BedSize {
+        BedSize { width_mm: 325.0, depth_mm: 320.0, height_mm: Some(325.0) }
+    }
+    fn side(n: &str) -> Vec<Option<String>> {
+        vec![Some(n.to_string())]
+    }
+    fn in_rect(b: [f64; 4], r: [f64; 4]) -> bool {
+        b[0] >= r[0] - 1e-6 && b[1] >= r[1] - 1e-6 && b[2] <= r[2] + 1e-6 && b[3] <= r[3] + 1e-6
+    }
+
+    #[test]
+    fn each_nozzle_reaches_its_own_area_and_shared_parts_the_overlap() {
+        let areas = dual_areas();
+        let l = reach_for_nozzles(&areas, &side("left")).unwrap();
+        assert_eq!((l.rect, l.height_mm, l.label.as_str()), ([0.0, 0.0, 325.0, 320.0], Some(320.0), "Left nozzle"));
+        let r = reach_for_nozzles(&areas, &side("Right")).unwrap();
+        assert_eq!((r.rect, r.height_mm, r.label.as_str()), ([20.0, 0.0, 325.0, 320.0], Some(325.0), "Right nozzle"));
+        let both = reach_for_nozzles(&areas, &[Some("left".into()), Some("right".into())]).unwrap();
+        assert_eq!((both.rect, both.height_mm, both.label.as_str()), ([20.0, 0.0, 320.0, 320.0], Some(320.0), "Both nozzles"));
+        // Unknown nozzle (a feeder with no nozzle set, or a filament not loaded): shared.
+        assert_eq!(reach_for_nozzles(&areas, &[None]).unwrap(), both);
+        assert_eq!(reach_for_nozzles(&areas, &[]).unwrap(), both); // nothing known: shared
+        // An explicit nozzle field wins over the name.
+        let mut named = areas.clone();
+        named[0].name = "A".into();
+        named[0].nozzle = Some("left".into());
+        assert_eq!(reach_for_nozzles(&named, &side("left")).unwrap().rect, [0.0, 0.0, 325.0, 320.0]);
+        assert_eq!(reach_for_area_name(&areas, "right nozzle").unwrap().rect, [20.0, 0.0, 325.0, 320.0]);
+        assert_eq!(reach_for_area_name(&areas, "shared").unwrap().rect, [20.0, 0.0, 320.0, 320.0]);
+    }
+
+    #[test]
+    fn printers_without_areas_arrange_exactly_as_before() {
+        assert_eq!(reach_for_nozzles(&[], &side("left")), None);
+        assert_eq!(reach_for_nozzles(&[], &[None]), None);
+        let meshes: Vec<TriangleMesh> = (0..7).map(|i| box_mesh(20.0 + i as f32 * 7.0, 30.0, 10.0 + i as f32)).collect();
+        let refs: Vec<&TriangleMesh> = meshes.iter().collect();
+        let b = bed(180.0, 180.0);
+        let s = ArrangeSettings::default();
+        let (a, ca) = auto_layout(&refs, &[], &b, &s);
+        let (b2, cb) = auto_layout_with_reach(&refs, &[], &vec![None; 7], &b, &s);
+        assert_eq!(a, b2);
+        assert_eq!(ca, cb);
+        assert!(cb.out_of_area.is_empty());
+    }
+
+    #[test]
+    fn mixed_plate_packs_one_nozzle_parts_outside_the_shared_strip() {
+        let areas = dual_areas();
+        let bed = dual_bed();
+        let both = reach_for_nozzles(&areas, &[None]);
+        let left = reach_for_nozzles(&areas, &side("left"));
+        let mut items: Vec<ArrangeItem> = Vec::new();
+        // Two big two-color parts fill the shared strip...
+        for _ in 0..2 {
+            items.push(ArrangeItem { reach: both.clone(), ..item(145.0, 300.0) });
+        }
+        // ...and three thin left-nozzle parts can only go in the left-only strip.
+        for _ in 0..3 {
+            items.push(ArrangeItem { reach: left.clone(), ..item(12.0, 80.0) });
+        }
+        let s = layer(5.0);
+        let p = arrange(&items, &bed, &s);
+        let c = check(&items, &p, &bed, &s);
+        assert!(c.fits(), "{c:?} {p:?}");
+        assert_eq!(c.plates, 1, "{p:?}");
+        for (i, it) in items.iter().enumerate() {
+            let b = bbox_2d(&placed_outline(it, &p[i]));
+            assert!(in_rect(b, it.allowed_rect(&bed)), "{i} {b:?}");
+            if i >= 2 {
+                assert!(b[2] <= 20.0 + 1e-6, "left part {i} in the shared strip: {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn shared_parts_overflow_to_more_plates() {
+        let areas = dual_areas();
+        let both = reach_for_nozzles(&areas, &[None]);
+        let items: Vec<ArrangeItem> =
+            (0..4).map(|_| ArrangeItem { reach: both.clone(), ..item(145.0, 300.0) }).collect();
+        let s = layer(5.0);
+        let p = arrange(&items, &dual_bed(), &s);
+        let c = check(&items, &p, &dual_bed(), &s);
+        assert!(c.fits(), "{c:?}");
+        assert_eq!(c.plates, 2);
+        // Without areas the same parts need only... still two (the bed is 325 wide), but
+        // a part as wide as the left area fits only where the left nozzle reaches.
+        let wide = vec![ArrangeItem { reach: both.clone(), ..item(310.0, 50.0) }];
+        let c = check(&wide, &arrange(&wide, &dual_bed(), &s), &dual_bed(), &s);
+        assert!(!c.fits(), "310 mm can't fit the 300 mm shared strip: {c:?}");
+        let wide = vec![ArrangeItem { reach: reach_for_nozzles(&areas, &side("left")), ..item(310.0, 50.0) }];
+        let c = check(&wide, &arrange(&wide, &dual_bed(), &s), &dual_bed(), &s);
+        assert!(c.fits(), "{c:?}");
+    }
+
+    #[test]
+    fn height_limit_follows_the_area() {
+        let areas = dual_areas();
+        let s = layer(5.0);
+        let tall = |n: &str| ArrangeItem { height: 322.0, reach: reach_for_nozzles(&areas, &side(n)), ..item(40.0, 40.0) };
+        let items = vec![tall("right"), tall("left")];
+        let c = check(&items, &arrange(&items, &dual_bed(), &s), &dual_bed(), &s);
+        assert_eq!(c.too_tall, vec![1], "{c:?}");
+    }
+
+    #[test]
+    fn a_part_no_area_fits_is_left_beside_the_bed_and_flagged() {
+        let areas = dual_areas();
+        let s = layer(5.0);
+        let bed = dual_bed();
+        let items = vec![
+            ArrangeItem { reach: Some(Reach::unreachable()), ..item(40.0, 40.0) },
+            ArrangeItem { reach: reach_for_nozzles(&areas, &side("left")), ..item(40.0, 40.0) },
+            ArrangeItem { reach: Some(Reach::unreachable()), ..item(30.0, 30.0) },
+        ];
+        let p = arrange(&items, &bed, &s);
+        // Not put anywhere on the bed: beside it, left of x = 0, not overlapping each other.
+        for i in [0, 2] {
+            let b = bbox_2d(&placed_outline(&items[i], &p[i]));
+            assert!(b[2] <= -9.9, "{i}: {b:?}");
+        }
+        let (b0, b2) = (bbox_2d(&placed_outline(&items[0], &p[0])), bbox_2d(&placed_outline(&items[2], &p[2])));
+        assert!(b2[2] <= b0[0] || b0[2] <= b2[0], "{b0:?} {b2:?}");
+        let c = check(&items, &p, &bed, &s);
+        assert_eq!(c.unreachable, vec![0, 2]);
+        assert_eq!(c.out_of_area, vec![0, 2]);
+        assert!(c.off_plate.is_empty(), "flagged as unreachable, not off the plate");
+        assert!(!c.fits());
+        assert_eq!(c.plates, 1);
+        // Dragged onto the bed it is still flagged, and never collides with anything.
+        let mut q = p.clone();
+        q[0] = q[1];
+        let c = check(&items, &q, &bed, &s);
+        assert_eq!(c.unreachable, vec![0, 2]);
+        assert!(c.collisions.is_empty());
+        // Pinned there, arrange leaves it and packs around nothing.
+        let mut pinned = items.clone();
+        pinned[0].pinned = Some(q[0]);
+        let p2 = arrange(&pinned, &bed, &s);
+        assert_eq!(p2[0], q[0]);
+        assert!(check(&items, &p2, &bed, &s).collisions.is_empty());
+    }
+
+    #[test]
+    fn shared_parts_pack_in_a_computed_overlap() {
+        // No "both" area: the shared part gets the left/right overlap (computed by
+        // fp-core); test data only.
+        let overlap = Reach { rect: [20.0, 5.0, 325.0, 320.0], height_mm: Some(320.0), label: "Overlap".into(), unreachable: false };
+        let areas = dual_areas();
+        let s = layer(5.0);
+        let bed = dual_bed();
+        let items = vec![
+            ArrangeItem { reach: Some(overlap.clone()), ..item(60.0, 60.0) },
+            ArrangeItem { reach: reach_for_nozzles(&areas, &side("left")), ..item(60.0, 60.0) },
+        ];
+        let p = arrange(&items, &bed, &s);
+        let c = check(&items, &p, &bed, &s);
+        assert!(c.fits(), "{c:?}");
+        let b = bbox_2d(&placed_outline(&items[0], &p[0]));
+        assert!(b[0] >= 20.0 - 1e-6 && b[1] >= 5.0 - 1e-6, "{b:?}");
+    }
+
+    #[test]
+    fn a_part_moved_where_its_nozzle_cannot_reach_is_out_of_area() {
+        let areas = dual_areas();
+        let s = layer(5.0);
+        let items = vec![
+            ArrangeItem { reach: reach_for_nozzles(&areas, &side("right")), ..item(10.0, 10.0) },
+            ArrangeItem { reach: reach_for_nozzles(&areas, &side("left")), ..item(4.0, 10.0) },
+        ];
+        let p = vec![
+            Placement { plate: 0, x: 10.0, y: 100.0, rot_deg: 0.0 }, // x 5..15: left-only strip
+            Placement { plate: 0, x: 322.5, y: 100.0, rot_deg: 0.0 }, // x 320.5..324.5: left reaches it
+        ];
+        let c = check(&items, &p, &dual_bed(), &s);
+        assert_eq!(c.out_of_area, vec![0]);
+        assert!(c.off_plate.is_empty());
+        assert!(!c.fits());
+    }
+
+    // ---- extruder clearance (by object) ----------------------------------------------------
+
+    fn by_object(dist: Option<f64>, lid: Option<f64>) -> ArrangeSettings {
+        ArrangeSettings {
+            sequence: Sequence::ByObject,
+            auto_rotate: false,
+            clearance_radius_mm: 20.0,
+            clearance_height_mm: 30.0,
+            clearance_dist_to_rod_mm: dist,
+            clearance_height_to_lid_mm: lid,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn old_plate_settings_still_load() {
+        let s: ArrangeSettings = serde_json::from_str(r#"{"spacing_mm":4,"sequence":"by_object","clearance_radius_mm":40,"clearance_height_mm":25}"#).unwrap();
+        assert_eq!((s.clearance_radius_mm, s.clearance_height_mm), (40.0, 25.0));
+        assert_eq!((s.clearance_dist_to_rod_mm, s.clearance_height_to_lid_mm), (None, None));
+        assert_eq!(s.dist_to_rod(), None, "no distance to rod set: no front-to-back check");
+        let s: ArrangeSettings = serde_json::from_str(r#"{"clearance_height_to_rod_mm":22}"#).unwrap();
+        assert_eq!(s.clearance_height_mm, 22.0);
+    }
+
+    #[test]
+    fn tall_parts_keep_the_distance_to_rod_front_to_back() {
+        let tall = || ArrangeItem { height: 60.0, ..item(30.0, 30.0) };
+        let items = vec![tall(), tall(), item(30.0, 30.0)];
+        let s = by_object(Some(70.0), None);
+        let bed = bed(250.0, 250.0);
+        let p = arrange(&items, &bed, &s);
+        let c = check(&items, &p, &bed, &s);
+        assert!(c.fits(), "{c:?} {p:?}");
+        assert_eq!(c.plates, 1);
+        let (a, b) = (bbox_2d(&placed_outline(&items[0], &p[0])), bbox_2d(&placed_outline(&items[1], &p[1])));
+        let gap = (b[1] - a[3]).max(a[1] - b[3]);
+        assert!(gap >= 70.0 - 1e-6, "gap {gap}");
+        // Side by side (same Y) is a conflict even when far apart in X.
+        let side = vec![
+            Placement { plate: 0, x: 40.0, y: 100.0, rot_deg: 0.0 },
+            Placement { plate: 0, x: 200.0, y: 100.0, rot_deg: 0.0 },
+            Placement { plate: 0, x: 120.0, y: 220.0, rot_deg: 0.0 },
+        ];
+        let c = check(&items, &side, &bed, &s);
+        assert_eq!(c.rod_conflicts, vec![[0, 1]]);
+        assert!(!c.fits());
+        // A short part next to a tall one is fine (it prints first).
+        assert!(!c.rod_conflicts.iter().flatten().any(|&i| i == 2));
+        // When the bed is too shallow for the distance, the second tall part overflows.
+        let shallow = BedSize { width_mm: 250.0, depth_mm: 120.0, height_mm: None };
+        let p = arrange(&items[..2], &shallow, &s);
+        assert_eq!(check(&items[..2], &p, &shallow, &s).plates, 2);
+        // By layer ignores it, and so does a printer with no distance to rod set.
+        let c = check(&items, &side, &bed, &layer(5.0));
+        assert!(c.rod_conflicts.is_empty());
+        let c = check(&items, &side, &bed, &by_object(None, None));
+        assert!(c.rod_conflicts.is_empty());
+    }
+
+    #[test]
+    fn only_the_last_part_may_go_above_the_lid() {
+        let high = || ArrangeItem { height: 120.0, ..item(20.0, 20.0) };
+        let items = vec![high(), high(), item(20.0, 20.0)];
+        let s = by_object(Some(0.0), Some(100.0));
+        let bed = BedSize { width_mm: 250.0, depth_mm: 250.0, height_mm: Some(250.0) };
+        let p = arrange(&items, &bed, &s);
+        let c = check(&items, &p, &bed, &s);
+        assert!(c.fits(), "{c:?}");
+        assert_ne!(p[0].plate, p[1].plate, "one part above the lid per plate");
+        // The one above the lid prints last on its plate.
+        let pl = p[0].plate;
+        assert_eq!(*c.order[pl].last().unwrap(), 0, "{:?}", c.order);
+        // Both on one plate: flagged.
+        let same = vec![
+            Placement { plate: 0, x: 40.0, y: 40.0, rot_deg: 0.0 },
+            Placement { plate: 0, x: 200.0, y: 200.0, rot_deg: 0.0 },
+            Placement { plate: 0, x: 120.0, y: 120.0, rot_deg: 0.0 },
+        ];
+        let c = check(&items, &same, &bed, &s);
+        assert_eq!(c.over_lid, vec![0, 1]);
+        assert!(!c.fits());
+        // No lid set: no limit.
+        assert!(check(&items, &same, &bed, &by_object(Some(0.0), None)).over_lid.is_empty());
     }
 
     #[test]
