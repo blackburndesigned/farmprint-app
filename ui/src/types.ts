@@ -151,6 +151,24 @@ export interface Printer {
   bed_x_mm?: number | null;
   /** Bed depth (Y) in mm; null/absent = unknown (use the 220 mm default). */
   bed_y_mm?: number | null;
+  /** Units holding this printer's spools, in order. Absent on older snapshots. */
+  feeders?: PrinterFeeder[];
+}
+
+/** A named unit on a printer holding spools (see fp-core `PrinterFeeder`). Feeders that
+ *  feed the printer group consecutive slot numbers; a dry box holds unloaded spools. */
+export interface PrinterFeeder {
+  id: string;
+  name: string;
+  slot_count: number;
+  is_dry_box: boolean;
+  note?: string | null;
+  /** First printer slot number in this feeder; null for a dry box. */
+  first_slot?: number | null;
+  /** Spools in it (empty slots left out). Feeding: printer slot number; dry box: position in the box. */
+  spools: PrinterSlot[];
+  /** Not saved by the user (the default feeder, or loaded slots past the last feeder). */
+  auto?: boolean;
 }
 
 export interface OverstockItem {

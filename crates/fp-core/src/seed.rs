@@ -68,6 +68,28 @@ pub fn init_schema(conn: &Connection) -> CoreResult<()> {
          CREATE INDEX IF NOT EXISTS idx_flow_events_batch ON flow_events(batch_id);
          CREATE INDEX IF NOT EXISTS idx_overstock_product_part_filament ON overstock(product_id, part_id, filament_id);",
     )?;
+    // Printer feeders (2026-11-22): additive, local only. Schema version unchanged (3).
+    // A printer with no rows here reads as one default feeder holding its current slots,
+    // so old databases need no data migration. Dry box spools live in
+    // `printer_feeder_spools` and never take a printer slot number.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS printer_feeders (
+            id TEXT PRIMARY KEY,
+            printer_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slot_count INTEGER NOT NULL,
+            is_dry_box INTEGER NOT NULL DEFAULT 0,
+            note TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_printer_feeders_printer ON printer_feeders(printer_id, position);
+        CREATE TABLE IF NOT EXISTS printer_feeder_spools (
+            feeder_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            filament_id TEXT NOT NULL,
+            PRIMARY KEY (feeder_id, position)
+        );",
+    )?;
     // Local dedupe map for website ingest. Kept when the local order is deleted, so a
     // deleted website order is never re-imported (FarmPrint never writes back to the shop).
     conn.execute_batch(

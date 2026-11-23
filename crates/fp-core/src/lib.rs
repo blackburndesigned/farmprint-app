@@ -1,5 +1,6 @@
 pub mod applock;
 pub mod delta;
+pub mod feeders;
 pub mod models;
 pub mod sample;
 pub mod seed;
@@ -467,6 +468,7 @@ impl ShopLedger {
                     "UPDATE part_units SET filament_id = ?1 WHERE filament_id = ?2",
                     "UPDATE catalog_parts SET default_filament_id = ?1 WHERE default_filament_id = ?2",
                     "UPDATE printer_slots SET filament_id = ?1 WHERE filament_id = ?2",
+                    "UPDATE printer_feeder_spools SET filament_id = ?1 WHERE filament_id = ?2",
                 ] {
                     tx.execute(sql, params![canon, dup])?;
                 }
@@ -514,6 +516,8 @@ impl ShopLedger {
             DELETE FROM order_lines;
             DELETE FROM orders;
             DELETE FROM imported_store_orders;
+            DELETE FROM printer_feeder_spools;
+            DELETE FROM printer_feeders;
             DELETE FROM printer_slots;
             DELETE FROM printers;
             DELETE FROM catalog_parts;
@@ -552,6 +556,8 @@ impl ShopLedger {
             DELETE FROM overstock;
             DELETE FROM part_units;
             DELETE FROM order_lines;
+            DELETE FROM printer_feeder_spools;
+            DELETE FROM printer_feeders;
             DELETE FROM printer_slots;
             DELETE FROM printers;
             DELETE FROM catalog_parts;
@@ -1835,6 +1841,14 @@ impl ShopLedger {
             "DELETE FROM printer_slots WHERE printer_id = ?1",
             params![printer_id],
         )?;
+        tx.execute(
+            "DELETE FROM printer_feeder_spools WHERE feeder_id IN (SELECT id FROM printer_feeders WHERE printer_id = ?1)",
+            params![printer_id],
+        )?;
+        tx.execute(
+            "DELETE FROM printer_feeders WHERE printer_id = ?1",
+            params![printer_id],
+        )?;
         tx.execute("DELETE FROM printers WHERE id = ?1", params![printer_id])?;
         tx.commit()?;
         self.snapshot()
@@ -1845,6 +1859,17 @@ impl ShopLedger {
         printer_id: &str,
         filament_ids: Vec<String>,
     ) -> CoreResult<ShopSnapshot> {
+        // With saved feeders, a slot past the last feeding slot has nowhere to go.
+        if let Some(cap) = feeders::saved_feeding_capacity(&self.conn, printer_id)? {
+            if let Some(pos) = filament_ids.iter().rposition(|f| !f.trim().is_empty()) {
+                if pos as i64 >= cap {
+                    return Err(CoreError::Validation(format!(
+                        "Slot {} is past the last feeder slot on this printer ({cap}). Add a feeder or more slots first.",
+                        pos + 1
+                    )));
+                }
+            }
+        }
         let tx = self.conn.transaction()?;
         tx.execute(
             "DELETE FROM printer_slots WHERE printer_id = ?1",
@@ -1977,6 +2002,10 @@ impl ShopLedger {
         let tx = self.conn.transaction()?;
         tx.execute(
             "DELETE FROM printer_slots WHERE filament_id = ?1",
+            params![filament_id],
+        )?;
+        tx.execute(
+            "DELETE FROM printer_feeder_spools WHERE filament_id = ?1",
             params![filament_id],
         )?;
         tx.execute("DELETE FROM filaments WHERE id = ?1", params![filament_id])?;
@@ -2155,6 +2184,9 @@ impl ShopLedger {
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
+        let feeder_rows = feeders::load_feeder_rows(&self.conn, None)?;
+        let dry_spools =
+            feeders::load_dry_box_spools(&self.conn, None, Some(filament_map), "#888888")?;
         let mut stmt = self.conn.prepare(
             "SELECT id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm FROM printers ORDER BY id",
         )?;
@@ -2176,7 +2208,13 @@ impl ShopLedger {
                             material: fil.map(|f| f.material.clone()).unwrap_or_default(),
                         }
                     })
+                    .collect::<Vec<_>>();
+                let saved: Vec<feeders::FeederRow> = feeder_rows
+                    .iter()
+                    .filter(|f| f.printer_id == id)
+                    .cloned()
                     .collect();
+                let feeders = feeders::layout_feeders(&id, &saved, &loaded_slots, &dry_spools);
                 Ok(Printer {
                     id,
                     name: r.get(1)?,
@@ -2190,6 +2228,7 @@ impl ShopLedger {
                     utilization_pct: r.get(5)?,
                     bed_x_mm: r.get(6)?,
                     bed_y_mm: r.get(7)?,
+                    feeders,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

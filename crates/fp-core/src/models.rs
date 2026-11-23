@@ -259,7 +259,7 @@ impl OrderShipFields {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PrinterSlot {
     pub slot_index: i64,
     pub filament_id: String,
@@ -286,6 +286,55 @@ pub struct Printer {
     /// Bed depth (Y) in mm; None = unknown (use the 220 mm default).
     #[serde(default)]
     pub bed_y_mm: Option<f64>,
+    /// The units holding this printer's spools, in order. Feeders that feed the printer
+    /// group consecutive slot numbers (`loaded_slots` is unchanged); a dry box holds
+    /// spools that are not loaded. A printer with no saved feeders shows one default
+    /// feeder holding its current slots.
+    #[serde(default)]
+    pub feeders: Vec<PrinterFeeder>,
+}
+
+/// A named unit on a printer that holds spools, with its own number of slots. The name
+/// is whatever the user calls it; FarmPrint never assumes a brand or model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PrinterFeeder {
+    pub id: String,
+    pub name: String,
+    pub slot_count: i64,
+    /// Holds spools but does not feed the printer: its spools are never in `loaded_slots`
+    /// and never take a slot number.
+    #[serde(default)]
+    pub is_dry_box: bool,
+    /// Optional note the user types (e.g. when the desiccant was changed).
+    #[serde(default)]
+    pub note: Option<String>,
+    /// First printer slot number in this feeder (slot N is filament N in the slicer).
+    /// None for a dry box.
+    #[serde(default)]
+    pub first_slot: Option<i64>,
+    /// Spools in this feeder, empty slots left out. For a feeding unit `slot_index` is the
+    /// printer slot number; for a dry box it is the 1-based position inside the box.
+    #[serde(default)]
+    pub spools: Vec<PrinterSlot>,
+    /// Not saved by the user: the default feeder of a printer with no saved feeders, or
+    /// the holder for loaded slots past the last saved feeder.
+    #[serde(default)]
+    pub auto: bool,
+}
+
+/// One feeder as the user edits it. `id` keeps an existing feeder (and its spools);
+/// None or an unknown id adds a new one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct FeederInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: String,
+    pub slot_count: i64,
+    #[serde(default)]
+    pub is_dry_box: bool,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

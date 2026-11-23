@@ -1585,6 +1585,43 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
+        "set_printer_feeders" => {
+            // { printer_id, feeders: [{ id?, name, slot_count, is_dry_box, note? }] }
+            let printer_id = args
+                .get("printer_id")
+                .or_else(|| args.get("printerId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let feeders: Vec<fp_core::FeederInput> = args
+                .get("feeders")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|e| format!("Feeders not saved: {e}"))?
+                .unwrap_or_default();
+            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            let snap = ledger
+                .set_printer_feeders(printer_id, feeders)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
+        "set_dry_box_spools" => {
+            // { feeder_id, filament_ids: ["fil-…", "", …] } by position in the dry box.
+            let feeder_id = args
+                .get("feeder_id")
+                .or_else(|| args.get("feederId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let filament_ids: Vec<String> = args
+                .get("filament_ids")
+                .or_else(|| args.get("filamentIds"))
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            let snap = ledger
+                .set_dry_box_spools(feeder_id, filament_ids)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
         "add_filament_swatch" => {
             let name = args
                 .get("name")

@@ -11,11 +11,13 @@ import { Check, ColorInput, PathRow, Row, Section, type Setter, caption, chooseP
 import { SLICERS, type SlicerKey, chooseSlicerAppPatch, pickSlicerPatch, savedSlicer } from "../../slicerChoice";
 import { Frame, X } from "lucide-react";
 import { Icon } from "../../icons";
-import { loadIntoNextSlot, loadedSlotCount, setSlotFilament, slotIdsByPosition, unloadSlot } from "../../views/printers/printerSlots";
+import { loadedSlotCount, setSlotFilament, slotIdsByPosition, unloadSlot } from "../../views/printers/printerSlots";
+import { dryBoxIds, feederCaption, feederCells, feedersOf, feedingCapacity } from "../../views/printers/printerFeeders";
+import { FeederBoxes } from "../../views/printers/FeederBoxes";
+import { FeederEditor } from "../../views/printers/FeederEditor";
 
 // --- Printers -------------------------------------------------------------------
 
-const MAX_FILAMENT_SLOTS = 4;
 const DEFAULT_ACCENT = "#8e8e93";
 
 const STATUS_CHIP: Record<string, { label: string; bg: string; fg: string }> = {
@@ -70,10 +72,10 @@ const PrinterCard: React.FC<{ printer: Printer; accent: string; onOpen: () => vo
         <div className="fp-printer-tile-name">{p.name}</div>
         <div className="fp-printer-tile-sub">{p.model || "No model"}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 5, minHeight: 18, marginTop: 4 }}>
-          {slots.length === 0 ? (
+          {slots.length === 0 && feedersOf(p).every((f) => f.spools.length === 0) ? (
             <span className="fp-printer-tile-sub">No filament loaded</span>
           ) : (
-            slots.map((s) => <Swatch key={`${s.slot_index}-${s.filament_id}`} slot={s} />)
+            <FeederBoxes feeders={feedersOf(p)} variant="tile" />
           )}
         </div>
         <div className="fp-printer-tile-sub" style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}><Icon icon={Frame} size={12} /> {bedLabel(p)}</div>
@@ -105,6 +107,7 @@ const PrinterEditSheet: React.FC<{
   }, [onClose]);
   // By slot number: index k is Slot k + 1, "" an empty slot. The same color can fill several slots.
   const slotIds = slotIdsByPosition(p.loaded_slots ?? []);
+  const feeders = feedersOf(p);
   const filamentById = new Map(filaments.map((f) => [f.id, f]));
   const setSlots = (ids: string[]) => void run("set_printer_filament_slots", { printer_id: p.id, filament_ids: ids });
   const commitName = () => {
@@ -121,7 +124,7 @@ const PrinterEditSheet: React.FC<{
         role="dialog"
         aria-modal="true"
         aria-label={`Edit ${p.name}`}
-        style={{ width: "min(520px, 94vw)" }}
+        style={{ width: "min(640px, 94vw)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="fp-printer-sheet-head" style={{ background: `linear-gradient(160deg, ${accent}33, ${accent}08)` }}>
@@ -168,63 +171,83 @@ const PrinterEditSheet: React.FC<{
 
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>Loaded filament</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700 }}>Feeders</div>
               <span style={caption}>
-                {loadedSlotCount(slotIds)} of {MAX_FILAMENT_SLOTS} slots
+                {feeders.length} feeder{feeders.length === 1 ? "" : "s"} · {loadedSlotCount(slotIds)} of {feedingCapacity(feeders)} slots loaded
               </span>
             </div>
-            <div className="fp-form-group">
-              {slotIds.length === 0 && (
-                <div style={{ ...caption, padding: "8px 10px" }}>No filament loaded yet. Pick the colors on this printer so FarmPrint can match parts to it.</div>
-              )}
-              {slotIds.map((fid, i) => {
-                const f = fid ? filamentById.get(fid) : undefined;
-                return (
-                  <div key={i} className="fp-form-row">
-                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <Swatch
-                        slot={{ slot_index: i + 1, filament_id: fid, filament_name: f?.name || fid || "Empty", filament_hex: f?.hex || "", material: f?.material || "" }}
-                        size={20}
-                      />
-                      Slot {i + 1}
-                    </span>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1, justifyContent: "flex-end" }}>
-                      <select
-                        aria-label={`Slot ${i + 1} filament`}
-                        value={fid}
-                        onChange={(e) => setSlots(setSlotFilament(slotIds, i + 1, e.target.value))}
-                        style={{ ...sheetInput, flex: 1, maxWidth: 280 }}
-                      >
-                        {!fid && <option value="">Empty</option>}
-                        {filaments.map((fl) => (
-                          <option key={fl.id} value={fl.id}>
-                            {fl.brand} {fl.material} — {fl.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="fp-btn fp-btn-sm fp-btn-ghost"
-                        aria-label={`Unload slot ${i + 1}`}
-                        title="Unload"
-                        onClick={() => setSlots(unloadSlot(slotIds, i + 1))}
-                      >
-                        <Icon icon={X} size={14} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {loadedSlotCount(slotIds) < MAX_FILAMENT_SLOTS && filaments.length > 0 && (
-              <button type="button" className="fp-btn fp-btn-sm" style={{ marginTop: 8 }} onClick={() => setSlots(loadIntoNextSlot(slotIds, filaments[0].id))}>
-                + Add slot
-              </button>
+            <FeederEditor printerName={p.name} feeders={feeders} onSave={(f) => run("set_printer_feeders", { printer_id: p.id, feeders: f })} />
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Loaded filament</div>
+            {filaments.length === 0 && (
+              <div style={{ ...caption, padding: "0 0 6px" }}>Add colors to the filament library first, then load them here.</div>
             )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {feeders.map((fd) => (
+                <div key={fd.id} className="fp-form-group" style={fd.is_dry_box ? { borderStyle: "dashed" } : undefined}>
+                  <div className="fp-form-row" style={{ minHeight: 30 }}>
+                    <span style={{ fontWeight: 700, color: "var(--text-primary)" }}>{fd.name}</span>
+                    <span style={caption}>{feederCaption(fd)}{fd.note ? ` · ${fd.note}` : ""}</span>
+                  </div>
+                  {feederCells(fd).map((c) => {
+                    const fid = c.spool?.filament_id ?? "";
+                    const f = fid ? filamentById.get(fid) : undefined;
+                    const label = c.slotNumber !== null ? `Slot ${c.slotNumber}` : `Spot ${c.position}`;
+                    const setCell = (value: string) =>
+                      fd.is_dry_box
+                        ? void run("set_dry_box_spools", { feeder_id: fd.id, filament_ids: setSlotFilament(dryBoxIds(fd), c.position, value) })
+                        : setSlots(setSlotFilament(slotIds, c.slotNumber ?? 0, value));
+                    return (
+                      <div key={c.position} className="fp-form-row">
+                        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <Swatch
+                            slot={{ slot_index: c.slotNumber ?? c.position, filament_id: fid, filament_name: f?.name || c.spool?.filament_name || "Empty", filament_hex: fid ? f?.hex || c.spool?.filament_hex || "" : "transparent", material: f?.material || "" }}
+                            size={20}
+                          />
+                          {label}
+                        </span>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1, justifyContent: "flex-end" }}>
+                          <select
+                            aria-label={`${fd.name} ${label} filament`}
+                            value={fid}
+                            onChange={(e) => setCell(e.target.value)}
+                            style={{ ...sheetInput, flex: 1, maxWidth: 280 }}
+                          >
+                            <option value="">Empty</option>
+                            {fid && !f && <option value={fid}>{c.spool?.filament_name || "Deleted color"}</option>}
+                            {filaments.map((fl) => (
+                              <option key={fl.id} value={fl.id}>
+                                {[fl.brand, fl.material].filter(Boolean).join(" ")} — {fl.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="fp-btn fp-btn-sm fp-btn-ghost"
+                            aria-label={`Unload ${fd.name} ${label}`}
+                            title="Unload"
+                            disabled={!fid}
+                            onClick={() =>
+                              fd.is_dry_box
+                                ? void run("set_dry_box_spools", { feeder_id: fd.id, filament_ids: unloadSlot(dryBoxIds(fd), c.position) })
+                                : setSlots(unloadSlot(slotIds, c.slotNumber ?? 0))
+                            }
+                          >
+                            <Icon icon={X} size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border-subtle)", paddingTop: 12 }}>
-            <span style={caption}>Changes save as soon as you make them.</span>
+            <span style={caption}>Spool changes save as soon as you make them; feeder changes save with Save feeders.</span>
             <button type="button" className="fp-btn fp-btn-sm fp-btn-danger" onClick={onRemove}>
               Remove printer…
             </button>
