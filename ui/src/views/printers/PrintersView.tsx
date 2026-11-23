@@ -15,6 +15,8 @@ import { Check, Circle, CircleDot, Palette, X } from "lucide-react";
 import { Icon } from "../../icons";
 import { setSlotFilament, slotIdsByPosition, slotsHoldingSwatch, unloadSlot } from "./printerSlots";
 import { dryBoxIds, feedersOf, feederPayload, loadIntoFeeders } from "./printerFeeders";
+import { suggestionValues } from "../../filamentLabels";
+import { printerModelToSave, printerNameToSave } from "../../printerLabels";
 import { type FeederCellRef, FeederBoxes } from "./FeederBoxes";
 import { FeederEditor } from "./FeederEditor";
 import "./feeders.css";
@@ -39,7 +41,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   useEffect(() => { setPickedCell(null); setShowFeederEditor(false); }, [editingPrinterSlotsId]);
   const [showAddPrinterModal, setShowAddPrinterModal] = useState(false);
   const [newPrinterName, setNewPrinterName] = useState("");
-  const [newPrinterModel, setNewPrinterModel] = useState("Bambu P1S");
+  const [newPrinterModel, setNewPrinterModel] = useState("");
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("0.4");
   const [newPrinterBed, setNewPrinterBed] = useState<{ x: string; y: string }>({ x: "", y: "" });
   const [showFilamentModal, setShowFilamentModal] = useState(false);
@@ -87,6 +89,14 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   const lanePrinterId = (p: Printer) => (isUnassignedLane(p) ? null : p.id);
   const UNASSIGNED_ACCENT = "#64748b";
   const activeJobsCount = useMemo(() => allUnits.filter((u) => u.state === "Printing" || u.state === "Staged").length, [allUnits]);
+  const nameSuggestions = useMemo(
+    () => suggestionValues(localPrinters.map((p) => p.name)).sort((a, b) => a.localeCompare(b)),
+    [localPrinters]
+  );
+  const modelSuggestions = useMemo(
+    () => suggestionValues(localPrinters.map((p) => p.model)).sort((a, b) => a.localeCompare(b)),
+    [localPrinters]
+  );
 
   const handleConfirmFailure = () => {
     if (!failureModalTarget) return;
@@ -106,20 +116,22 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
 
   // Failures are shown and never faked locally: the ledger snapshot stays the source of truth.
   const handleCreatePrinter = async () => {
-    const name = newPrinterName.trim() || `Printer ${localPrinters.length + 1}`;
+    const name = printerNameToSave(newPrinterName, localPrinters.length);
+    const model = printerModelToSave(newPrinterModel);
     const bed = parseBedSize(newPrinterBed.x, newPrinterBed.y);
     if ("error" in bed) {
       notifyError(`${name} was not added`, bed.error);
       return;
     }
     try {
-      const updated = await invoke<ShopSnapshot>("add_printer", { name, model: newPrinterModel, nozzle_mm: parseFloat(newPrinterNozzle) || 0.4, ...bed });
+      const updated = await invoke<ShopSnapshot>("add_printer", { name, model, nozzle_mm: parseFloat(newPrinterNozzle) || 0.4, ...bed });
       if (updated?.printers) { setLocalPrinters(updated.printers); onSnapshotUpdated?.(updated); }
     } catch (e) {
       notifyError(`${name} was not added`, e);
       return;
     }
     setNewPrinterName("");
+    setNewPrinterModel("");
     setNewPrinterBed({ x: "", y: "" });
     setShowAddPrinterModal(false);
   };
@@ -256,7 +268,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 30, fontWeight: 900, letterSpacing: 0.4 }}>{printer.name}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(255,255,255,0.1)" }}>{printer.model}</span>
+                      {printer.model.trim() ? <span style={{ fontSize: 13, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(255,255,255,0.1)" }}>{printer.model}</span> : null}
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 800, color: isPrinting ? "#30d158" : "rgba(235,235,245,0.65)", marginTop: 4 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -306,7 +318,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                     {!isUnassignedLane(printer) && <button type="button" title={`Set loaded filament spools on ${printer.name}`} onClick={() => setEditingPrinterSlotsId(printer.id)} style={{ width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.26)", color: "#fff", cursor: "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}><Icon icon={Palette} size={14} /></button>}
-                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(0,0,0,0.22)", color: "#fff" }}>{printer.model}</span>
+                    {printer.model.trim() ? <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(0,0,0,0.22)", color: "#fff" }}>{printer.model}</span> : null}
                   </div>
                 </div>
                 {isUnassignedLane(printer) ? (
@@ -499,18 +511,21 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <label style={{ flex: 1, minWidth: 160, fontSize: 11.5 }}>
                   Printer Name
-                  <input type="text" placeholder="e.g. P1S #2 or H2D" value={newPrinterName} onChange={(e) => setNewPrinterName(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" }} />
+                  <input type="text" list="fp-printer-name-choices" placeholder="Printer name" value={newPrinterName} onChange={(e) => setNewPrinterName(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" }} />
+                  <datalist id="fp-printer-name-choices">
+                    {nameSuggestions.map((n) => (
+                      <option key={n} value={n} />
+                    ))}
+                  </datalist>
                 </label>
                 <label style={{ width: 150, fontSize: 11.5 }}>
                   Model
-                  <select value={newPrinterModel} onChange={(e) => setNewPrinterModel(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" }}>
-                    <option value="Bambu H2C">Bambu H2C</option>
-                    <option value="Bambu H2D">Bambu H2D</option>
-                    <option value="Bambu X1C">Bambu X1C</option>
-                    <option value="Bambu P1S">Bambu P1S</option>
-                    <option value="Bambu A1">Bambu A1</option>
-                    <option value="Bambu A1 Mini">Bambu A1 Mini</option>
-                  </select>
+                  <input type="text" list="fp-printer-model-choices" placeholder="Model" value={newPrinterModel} onChange={(e) => setNewPrinterModel(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" }} />
+                  <datalist id="fp-printer-model-choices">
+                    {modelSuggestions.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
                 </label>
                 <label style={{ width: 90, fontSize: 11.5 }}>
                   Nozzle (mm)
@@ -528,7 +543,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                 {localPrinters.map((p) => (
                   <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
                     <div>
-                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{p.name} <span style={{ fontSize: 11.5, color: "rgba(235,235,245,0.55)", fontWeight: 600 }}>({p.model} · {p.nozzle_mm}mm{p.bed_x_mm && p.bed_y_mm ? ` · bed ${p.bed_x_mm}×${p.bed_y_mm}mm` : ""})</span></div>
+                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{p.name} <span style={{ fontSize: 11.5, color: "rgba(235,235,245,0.55)", fontWeight: 600 }}>({[p.model.trim() || null, `${p.nozzle_mm}mm`, p.bed_x_mm && p.bed_y_mm ? `bed ${p.bed_x_mm}×${p.bed_y_mm}mm` : null].filter(Boolean).join(" · ")})</span></div>
                       <div style={{ fontSize: 11, color: "rgba(235,235,245,0.6)", marginTop: 2 }}>
                         {p.loaded_slots.length > 0 ? p.loaded_slots.map((s) => s.filament_name).join(" · ") : "No filament loaded"}
                       </div>

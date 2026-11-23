@@ -1506,15 +1506,16 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
         "add_printer" => {
+            // Blank name becomes "Printer N" in fp-core; a blank model stays blank.
             let name = args
                 .get("name")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Bambu Printer")
+                .unwrap_or("")
                 .to_string();
             let model = args
                 .get("model")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Bambu Lab P1S")
+                .unwrap_or("")
                 .to_string();
             let nozzle_mm = args
                 .get("nozzle_mm")

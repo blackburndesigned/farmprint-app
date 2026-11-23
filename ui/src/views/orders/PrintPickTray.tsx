@@ -1,6 +1,7 @@
 import React from "react";
 import { actorDevice } from "../../deviceLabel";
 import { PartUnit, Printer, TransitionRequest } from "../../types";
+import { printerOptionLabel } from "../../printerLabels";
 
 /** PrintPickTray.swift side drawer: pick queued parts across orders and send them to one printer. */
 export const PrintPickTray: React.FC<{
@@ -139,7 +140,7 @@ export const PrintPickTray: React.FC<{
       >
         {printers.map((p) => (
           <option key={p.id} value={p.id}>
-            Target Printer: {p.name} ({p.model})
+            Target Printer: {printerOptionLabel(p.name, p.model)}
           </option>
         ))}
       </select>

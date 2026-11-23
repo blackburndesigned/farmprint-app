@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./printersTab.css";
 import { appsFolderHint } from "../../platform";
 import { invoke } from "../../tauriInvoke";
 import { getShopSettings, saveShopSettingsPatch } from "../../settingsStore";
-import { BedSizeFields } from "../BedSizeFields";
+import { BedSizeFields, parseBedSize } from "../BedSizeFields";
+import { suggestionValues } from "../../filamentLabels";
+import { printerModelToSave, printerNameToSave } from "../../printerLabels";
 import { confirmRemovePrinter, notifyError } from "../../uiFeedback";
 import { FilamentSwatch, Printer, PrinterSlot, ShopSettings, ShopSnapshot } from "../../types";
 import { Check, ColorInput, PathRow, Row, Section, type Setter, caption, choosePath, inputStyle } from "./settingsUi";
@@ -292,6 +294,16 @@ export const PrintersTab: React.FC<{
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newModel, setNewModel] = useState("");
+  const [newBed, setNewBed] = useState<{ x: string; y: string }>({ x: "", y: "" });
+  const nameSuggestions = useMemo(
+    () => suggestionValues(printers.map((p) => p.name)).sort((a, b) => a.localeCompare(b)),
+    [printers]
+  );
+  const modelSuggestions = useMemo(
+    () => suggestionValues(printers.map((p) => p.model)).sort((a, b) => a.localeCompare(b)),
+    [printers]
+  );
   const run = async (cmd: string, args: Record<string, unknown>) => {
     try {
       const snap = await invoke<ShopSnapshot>(cmd, args);
@@ -305,11 +317,22 @@ export const PrintersTab: React.FC<{
     return /^#[0-9a-f]{6}$/i.test(hex) ? hex : DEFAULT_ACCENT;
   };
   const editing = printers.find((p) => p.id === editingId) || null;
-  const addPrinter = () => {
-    if (!newName.trim()) return;
-    void run("add_printer", { name: newName.trim(), model: "", nozzle_mm: 0 });
+  const resetAdd = () => {
     setNewName("");
+    setNewModel("");
+    setNewBed({ x: "", y: "" });
     setAdding(false);
+  };
+  const addPrinter = () => {
+    const name = printerNameToSave(newName, printers.length);
+    const model = printerModelToSave(newModel);
+    const bed = parseBedSize(newBed.x, newBed.y);
+    if ("error" in bed) {
+      notifyError(`${name} was not added`, bed.error);
+      return;
+    }
+    void run("add_printer", { name, model, nozzle_mm: 0, ...bed });
+    resetAdd();
   };
 
   return (
@@ -328,20 +351,49 @@ export const PrintersTab: React.FC<{
               <input
                 type="text"
                 autoFocus
+                list="fp-settings-printer-name-choices"
                 value={newName}
-                placeholder="New printer name"
+                placeholder="Printer name"
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") addPrinter();
-                  if (e.key === "Escape") setAdding(false);
+                  if (e.key === "Escape") resetAdd();
                 }}
                 style={{ ...inputStyle, width: "100%" }}
               />
+              <datalist id="fp-settings-printer-name-choices">
+                {nameSuggestions.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+              <input
+                type="text"
+                list="fp-settings-printer-model-choices"
+                value={newModel}
+                placeholder="Model"
+                onChange={(e) => setNewModel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addPrinter();
+                  if (e.key === "Escape") resetAdd();
+                }}
+                style={{ ...inputStyle, width: "100%" }}
+              />
+              <datalist id="fp-settings-printer-model-choices">
+                {modelSuggestions.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <BedSizeFields
+                bedX={null}
+                bedY={null}
+                onChangeText={(x, y) => setNewBed({ x, y })}
+                inputStyle={{ ...inputStyle, width: 64 }}
+              />
               <div style={{ display: "flex", gap: 6, width: "100%" }}>
-                <button type="button" className="fp-btn fp-btn-sm" style={{ flex: 1 }} onClick={() => setAdding(false)}>
+                <button type="button" className="fp-btn fp-btn-sm" style={{ flex: 1 }} onClick={resetAdd}>
                   Cancel
                 </button>
-                <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" style={{ flex: 1 }} disabled={!newName.trim()} onClick={addPrinter}>
+                <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" style={{ flex: 1 }} onClick={addPrinter}>
                   Add printer
                 </button>
               </div>

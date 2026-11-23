@@ -1754,12 +1754,25 @@ impl ShopLedger {
         bed_y_mm: Option<f64>,
     ) -> CoreResult<ShopSnapshot> {
         let (bed_x_mm, bed_y_mm) = validate_bed_size(bed_x_mm, bed_y_mm)?;
+        // No built-in model names. A blank name becomes "Printer N"; a blank model stays blank.
+        let name = {
+            let t = name.trim();
+            if !t.is_empty() {
+                t.to_string()
+            } else {
+                let count: i64 = self
+                    .conn
+                    .query_row("SELECT COUNT(*) FROM printers", [], |r| r.get(0))?;
+                format!("Printer {}", count + 1)
+            }
+        };
+        let model = model.trim().to_string();
         let id = format!("prn-{}", &Uuid::new_v4().to_string()[..8]);
         let tx = self.conn.transaction()?;
         tx.execute(
             "INSERT INTO printers (id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm)
              VALUES (?1, ?2, ?3, ?4, 'Idle', 0.0, ?5, ?6)",
-            params![id, name.trim(), model.trim(), nozzle_mm, bed_x_mm, bed_y_mm],
+            params![id, name, model, nozzle_mm, bed_x_mm, bed_y_mm],
         )?;
         for (idx, fid) in slot_filament_ids.iter().enumerate() {
             if !fid.trim().is_empty() {
@@ -4354,6 +4367,57 @@ mod tests {
     }
 
     #[test]
+    fn add_printer_uses_a_neutral_name_and_blank_model() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let before = ledger.snapshot().unwrap();
+        let existing = before.printers.len();
+        let demo = before
+            .printers
+            .iter()
+            .find(|p| p.name == "Printer 1")
+            .expect("seeded demo printer");
+        assert_eq!(demo.model, "Demo Printer");
+
+        let snap = ledger
+            .add_printer("  ".into(), "  ".into(), 0.4, vec![])
+            .unwrap();
+        let added = snap
+            .printers
+            .iter()
+            .find(|p| p.name == format!("Printer {}", existing + 1))
+            .expect("fallback-named printer");
+        assert_eq!(added.model, "");
+        assert_eq!((added.bed_x_mm, added.bed_y_mm), (None, None));
+
+        let snap = ledger
+            .add_printer_with_bed(
+                "  Shop 1  ".into(),
+                "  Custom  ".into(),
+                0.4,
+                vec![],
+                Some(256.0),
+                Some(256.0),
+            )
+            .unwrap();
+        let added = snap
+            .printers
+            .iter()
+            .find(|p| p.name == "Shop 1")
+            .expect("named printer");
+        assert_eq!(added.model, "Custom");
+        assert_eq!((added.bed_x_mm, added.bed_y_mm), (Some(256.0), Some(256.0)));
+
+        // Existing printers keep the name and model they already had.
+        let still = snap
+            .printers
+            .iter()
+            .find(|p| p.id == demo.id)
+            .expect("original printer");
+        assert_eq!(still.name, "Printer 1");
+        assert_eq!(still.model, "Demo Printer");
+    }
+
+    #[test]
     fn backup_pruning_keeps_one_per_day_for_two_weeks() {
         let head = "farmprint_shop_v2-";
         let today = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
@@ -4657,12 +4721,16 @@ mod tests {
                 None,
             )
             .unwrap();
-        ledger.rename_filament_brand("Overture", "  overture ").unwrap();
+        ledger
+            .rename_filament_brand("Overture", "  overture ")
+            .unwrap();
         let snap = ledger.snapshot().unwrap();
         let c = snap.filaments.iter().find(|f| f.name == "C").unwrap();
         // Only this brand existed, so the trimmed spelling the user typed is kept.
         assert_eq!(c.brand, "overture");
-        ledger.rename_filament_brand("overture", "POLYMAKER").unwrap();
+        ledger
+            .rename_filament_brand("overture", "POLYMAKER")
+            .unwrap();
         let snap = ledger.snapshot().unwrap();
         let c = snap.filaments.iter().find(|f| f.name == "C").unwrap();
         assert_eq!(c.brand, "Polymaker");
