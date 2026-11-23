@@ -82,6 +82,25 @@ export function slotHoverTitle(f: PrinterFeeder, c: FeederCell): string {
   return `${head}: ${parts.join(" · ")}`;
 }
 
+/** Type and brand shown on a slot chip. Blank type is an em dash; blank brand is "No brand". */
+export function slotChipText(spool: PrinterSlot | null): { type: string; brand: string } {
+  if (!spool) return { type: "Empty", brand: "" };
+  return { type: (spool.material || "").trim() || "\u2014", brand: displayBrand(spool.brand) };
+}
+
+/** Very light or very dark colors get a contrasting ring so the swatch edge stays visible
+ *  on either theme. Unreadable hex gets no ring. */
+export function swatchRing(hex?: string | null): "light" | "dark" | null {
+  const h = (hex || "").trim().replace(/^#/, "");
+  const six = /^[0-9a-f]{3}$/i.test(h) ? h.split("").map((c) => c + c).join("") : h.slice(0, 6);
+  if (!/^[0-9a-f]{6}$/i.test(six)) return null;
+  const n = parseInt(six, 16);
+  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  if (lum >= 0.82) return "light";
+  if (lum <= 0.16) return "dark";
+  return null;
+}
+
 /** Loads a swatch into the first empty feeding slot. Null when every feeding slot is full. */
 export function loadIntoFeeders(ids: readonly string[], feeders: readonly PrinterFeeder[], filamentId: string): string[] | null {
   const cap = feedingCapacity(feeders);

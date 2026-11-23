@@ -1,20 +1,48 @@
 import React from "react";
+import { Wind } from "lucide-react";
 import type { PrinterFeeder } from "../../types";
-import { shortTypeLabel } from "../../filamentLabels";
-import { type FeederCell, feederBrandLine, feederCaption, feederCells, slotHoverTitle } from "./printerFeeders";
+import { Icon } from "../../icons";
+import { swatchBackground } from "../../platform";
+import {
+  type FeederCell, feederBrandLine, feederCaption, feederCells, slotChipText, slotHoverTitle, swatchRing,
+} from "./printerFeeders";
 
 /** Which cell is picked in the spool sheet. */
 export interface FeederCellRef { feederId: string; position: number }
 
 type Variant = "lane" | "wall" | "sheet" | "tile";
 
-const DOT: Record<Variant, number> = { lane: 14, wall: 18, sheet: 22, tile: 12 };
+const SWATCH: Record<Variant, number> = { lane: 26, wall: 30, sheet: 26, tile: 12 };
+
+/** The spool color as a round swatch; very light or dark colors get a contrasting ring. */
+const Swatch: React.FC<{ cell: FeederCell; size: number }> = ({ cell, size }) => {
+  if (!cell.spool) return <span className="fp-slot-swatch fp-slot-swatch-empty" style={{ width: size, height: size }} />;
+  const hex = cell.spool.filament_hex || "#888888";
+  const ring = swatchRing(hex);
+  return (
+    <span
+      className={`fp-slot-swatch${ring ? ` fp-slot-swatch-ring-${ring}` : ""}`}
+      style={{ width: size, height: size, background: swatchBackground(hex) }}
+    />
+  );
+};
+
+/** Slot number, or a dry-box marker for a dry box spot. */
+const SlotMark: React.FC<{ cell: FeederCell }> = ({ cell }) =>
+  cell.slotNumber !== null ? (
+    <span className="fp-slot-num">{cell.slotNumber}</span>
+  ) : (
+    <span className="fp-slot-num fp-slot-num-dry" aria-label="Dry box">
+      <Icon icon={Wind} size={9} strokeWidth={2.5} />
+    </span>
+  );
 
 /**
- * Each feeder as its own box of spool colors. Feeders that feed the printer show their
- * slot numbers; a dry box is drawn with a dashed border and no slot numbers.
- * Compact views put a short type label under each loaded dot and one brand line on the box.
- * Wall TV and the edit sheet show color name, brand and type in full beside each slot.
+ * Each feeder as its own box of slot chips. One chip is one slot: the color swatch with the
+ * spool's type and brand in the same bordered chip, and the slot number in its corner (a dry
+ * box spot shows a dry-box marker instead). Empty slots are dashed chips.
+ * The lane row is one line that scrolls sideways; Wall TV and the spool sheet list each slot
+ * as a wider chip with the color name too. Settings tiles show swatches only.
  */
 export const FeederBoxes: React.FC<{
   feeders: PrinterFeeder[];
@@ -22,9 +50,8 @@ export const FeederBoxes: React.FC<{
   selected?: FeederCellRef | null;
   onCellClick?: (feeder: PrinterFeeder, cell: FeederCell) => void;
 }> = ({ feeders, variant, selected, onCellClick }) => {
-  const dot = DOT[variant];
-  const compact = variant === "lane" || variant === "tile";
-  const label = variant === "wall" || variant === "sheet";
+  const size = SWATCH[variant];
+  const wide = variant === "wall" || variant === "sheet";
   return (
     <div className={`fp-feeders fp-feeders-${variant}`}>
       {feeders.map((f) => {
@@ -38,45 +65,57 @@ export const FeederBoxes: React.FC<{
           >
             {variant !== "tile" && (
               <div className="fp-feeder-head">
+                {f.is_dry_box ? <Icon icon={Wind} size={variant === "lane" ? 10 : 12} strokeWidth={2.5} className="fp-feeder-dry-icon" /> : null}
                 <span className="fp-feeder-name">{f.name}</span>
-                {!compact && <span className="fp-feeder-caption">{feederCaption(f)}</span>}
-                {compact && f.is_dry_box && !/dry/i.test(f.name) && <span className="fp-feeder-caption">Dry</span>}
+                <span className="fp-feeder-caption">{feederCaption(f)}</span>
               </div>
             )}
             <div className="fp-feeder-cells">
               {feederCells(f).map((c) => {
                 const isSel = !!selected && selected.feederId === f.id && selected.position === c.position;
-                const type = compact ? shortTypeLabel(c.spool?.material) : "";
-                const meta = c.spool
-                  ? [c.spool.brand?.trim() ? c.spool.brand.trim() : null, (c.spool.material || "").trim()].filter(Boolean).join(" · ")
-                  : "";
                 const title = slotHoverTitle(f, c);
-                const dotEl = (
-                  <span className="fp-feeder-swatch">
-                    <span
-                      className={`fp-feeder-dot${c.spool ? "" : " fp-feeder-dot-empty"}`}
-                      style={{ width: dot, height: dot, background: c.spool ? c.spool.filament_hex || "#888888" : undefined }}
-                    />
-                    {type ? <span className="fp-feeder-type">{type}</span> : null}
-                  </span>
-                );
-                const body = (
-                  <>
-                    {c.slotNumber !== null && !compact && <span className="fp-feeder-num">{c.slotNumber}</span>}
-                    {dotEl}
-                    {label && (
-                      <span className="fp-feeder-spool-block">
-                        <span className="fp-feeder-spool">{c.spool ? c.spool.filament_name : "Empty"}</span>
-                        {meta ? <span className="fp-feeder-spool-meta">{meta}</span> : null}
+                const { type, brand } = slotChipText(c.spool);
+                const cls = [
+                  variant === "tile" ? "fp-feeder-cell" : "fp-slot-chip",
+                  c.spool ? "" : "fp-slot-chip-empty",
+                  f.is_dry_box ? "fp-slot-chip-dry" : "",
+                  isSel ? "fp-slot-chip-sel" : "",
+                ].filter(Boolean).join(" ");
+                let body: React.ReactNode;
+                if (variant === "tile") {
+                  body = <Swatch cell={c} size={size} />;
+                } else if (wide) {
+                  body = (
+                    <>
+                      <SlotMark cell={c} />
+                      <Swatch cell={c} size={size} />
+                      <span className="fp-slot-text">
+                        <span className="fp-slot-name">{c.spool ? c.spool.filament_name || "Unknown" : "Empty"}</span>
+                        {c.spool ? (
+                          <span className="fp-slot-meta">
+                            <span className="fp-slot-type">{type}</span>
+                            <span className="fp-slot-sep" aria-hidden="true">·</span>
+                            <span className="fp-slot-brand">{brand}</span>
+                          </span>
+                        ) : null}
                       </span>
-                    )}
-                  </>
-                );
+                    </>
+                  );
+                } else {
+                  body = (
+                    <>
+                      <SlotMark cell={c} />
+                      <Swatch cell={c} size={size} />
+                      <span className="fp-slot-type">{type}</span>
+                      {c.spool ? <span className="fp-slot-brand">{brand}</span> : null}
+                    </>
+                  );
+                }
                 return onCellClick ? (
                   <button
                     key={c.position}
                     type="button"
-                    className={`fp-feeder-cell${isSel ? " fp-feeder-cell-sel" : ""}`}
+                    className={cls}
                     title={title}
                     aria-label={title}
                     aria-pressed={isSel}
@@ -85,15 +124,12 @@ export const FeederBoxes: React.FC<{
                     {body}
                   </button>
                 ) : (
-                  <span key={c.position} className="fp-feeder-cell" title={title}>
+                  <span key={c.position} className={cls} title={title} aria-label={title}>
                     {body}
                   </span>
                 );
               })}
             </div>
-            {variant !== "tile" && brands ? (
-              <div className="fp-feeder-brands" title={brands}>{brands}</div>
-            ) : null}
           </div>
         );
       })}
