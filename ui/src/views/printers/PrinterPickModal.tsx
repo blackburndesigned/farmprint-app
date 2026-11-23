@@ -1,5 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type { Printer, TransitionRequest } from "../../types";
+import { plateFitSummary } from "./plate/plateApi";
+import type { FitSummary } from "./plate/plateModel";
+import { FitChip, PlateFitSummary } from "./plate/PlateFitSummary";
 import { CircleDashed, CirclePlay, Printer as PrinterIcon } from "lucide-react";
 import { Icon } from "../../icons";
 import { canConfirmPick, type PrintPickMode } from "./markPrinting";
@@ -24,7 +27,9 @@ export const PrinterPickModal: React.FC<{
   onChange: (next: PendingPrintPick) => void;
   onCancel: () => void;
   onConfirm: (mode: PrintPickMode) => void;
-}> = ({ pending, printers, onChange, onCancel, onConfirm }) => {
+  /** Open the plate view for the picked printer ("Arrange plate…"). */
+  onArrange?: () => void;
+}> = ({ pending, printers, onChange, onCancel, onConfirm, onArrange }) => {
   const n = pending.req.unit_ids.length;
   const parts = `${n} part${n === 1 ? "" : "s"}`;
   const mark = pending.mode === "mark";
@@ -33,6 +38,29 @@ export const PrinterPickModal: React.FC<{
   const staged = !!pending.stagedOnPrinter;
   const canPrint = canConfirmPick("print", pending.printerId, printers);
   const canMark = canConfirmPick("mark", pending.printerId, printers);
+  // Print!: how the parts land on each printer's bed when arranged automatically. Shown as
+  // a small summary; the plate view only opens when asked.
+  const [fit, setFit] = useState<Record<string, FitSummary> | null>(null);
+  const [fitError, setFitError] = useState<string | null>(null);
+  const unitKey = pending.req.unit_ids.join(",");
+  const printerKey = printers.map((p) => `${p.id}:${p.bed_x_mm ?? ""}x${p.bed_y_mm ?? ""}x${p.bed_z_mm ?? ""}`).join(",");
+  useEffect(() => {
+    if (mark || printers.length === 0) return;
+    let stop = false;
+    setFitError(null);
+    plateFitSummary(pending.req.unit_ids, printers.map((p) => p.id))
+      .then((r) => !stop && setFit(r))
+      .catch((e) => !stop && setFitError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mark, unitKey, printerKey]);
+  const picked = printers.find((p) => p.id === pending.printerId);
+  const pickedFit = picked ? fit?.[picked.id] : undefined;
+  const pickedTooBig = !!pickedFit && (pickedFit.check.off_plate.length > 0 || pickedFit.check.too_tall.length > 0);
+  const bedText = (p: Printer) =>
+    p.bed_x_mm && p.bed_y_mm ? `${Math.round(p.bed_x_mm)} × ${Math.round(p.bed_y_mm)}${p.bed_z_mm ? ` × ${Math.round(p.bed_z_mm)}` : ""} mm` : "";
   const row = (id: string, body: React.ReactNode) => (
     <label
       key={id || "none"}
@@ -52,7 +80,7 @@ export const PrinterPickModal: React.FC<{
   );
   return (
     <div className="fp-modal-backdrop" onClick={(e) => { e.stopPropagation(); onCancel(); }}>
-      <div className="fp-modal-window" role="dialog" aria-modal="true" aria-label={mark ? "Mark Printing" : "Print!"} style={{ width: "min(440px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
+      <div className="fp-modal-window" role="dialog" aria-modal="true" aria-label={mark ? "Mark Printing" : "Print!"} style={{ width: mark ? "min(440px, 92vw)" : "min(500px, 94vw)" }} onClick={(e) => e.stopPropagation()}>
         <div className="fp-modal-header">
           <div>
             <div className="fp-modal-title">{mark ? `Mark ${parts} Printing on which printer?` : `Send ${parts} to which printer?`}</div>
@@ -69,8 +97,17 @@ export const PrinterPickModal: React.FC<{
             row(
               p.id,
               <>
-                <span style={{ fontWeight: 600 }}>{p.name}</span>
-                {p.model && <span style={{ opacity: 0.6, fontSize: 12 }}>{p.model}{p.status ? ` · ${p.status}` : ""}</span>}
+                <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{p.name}</span>
+                {(p.model || bedText(p)) && (
+                  <span style={{ opacity: 0.6, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {[p.model, bedText(p), p.status].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+                {!mark && (
+                  <span style={{ marginLeft: "auto" }}>
+                    <FitChip summary={fit?.[p.id]} />
+                  </span>
+                )}
               </>
             )
           )}
@@ -81,6 +118,15 @@ export const PrinterPickModal: React.FC<{
               <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>No printer yet</span>
               <span style={{ opacity: 0.6, fontSize: 12 }}>Mark Printing only · shows under Unassigned{staged ? "; staged parts keep their printer" : ""}</span>
             </>
+          )}
+          {!mark && picked && (
+            <PlateFitSummary
+              summary={pickedFit}
+              loading={!fit && !fitError}
+              error={fitError}
+              printerName={picked.name}
+              onArrange={() => onArrange?.()}
+            />
           )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
             <button type="button" className="fp-btn fp-btn-sm" onClick={onCancel}>Cancel</button>
@@ -97,8 +143,8 @@ export const PrinterPickModal: React.FC<{
               <button
                 type="button"
                 className="fp-btn fp-btn-sm fp-btn-primary"
-                disabled={!canPrint}
-                title={canPrint ? "Build the plate and open it in the slicer" : "Pick a printer first"}
+                disabled={!canPrint || pickedTooBig}
+                title={pickedTooBig ? "A part doesn't fit this printer. Pick another printer or open Arrange plate…" : canPrint ? "Arrange the plate automatically and open it in the slicer" : "Pick a printer first"}
                 onClick={() => onConfirm("print")}
               >
                 <Icon icon={PrinterIcon} size={14} /> Print!
