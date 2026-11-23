@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { usePersistentState } from "../../usePersistentState";
 import { invoke } from "../../tauriInvoke";
 import { OverstockItem, PartUnit, ShopSnapshot } from "../../types";
 import { PartThumbnail3D } from "../../components/PartThumbnail3D";
@@ -14,8 +15,12 @@ export const OverstockView: React.FC<{
   onSnapshotUpdated?: (next: ShopSnapshot) => void;
 }> = ({ overstock, snapshot, onSnapshotUpdated }) => {
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"nameAZ" | "nameZA" | "stockHigh" | "demandFirst">("demandFirst");
-  const [needsQueueOnly, setNeedsQueueOnly] = useState(false);
+  const [sortBy, setSortBy] = usePersistentState(
+    "overstock.sortBy",
+    "demandFirst",
+    ["nameAZ", "nameZA", "stockHigh", "demandFirst"] as const,
+  );
+  const [needsQueueOnly, setNeedsQueueOnly] = usePersistentState("overstock.needsQueueOnly", false, [true, false] as const);
   const [showAddSheet, setShowAddSheet] = useState(false);
   const [items, setItems] = useState<OverstockItem[]>(overstock);
   useEffect(() => {

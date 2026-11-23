@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
+import { usePersistentState } from "../../usePersistentState";
 import { actorDevice } from "../../deviceLabel";
 import { ImportNotesBanner, importNoteCount, recordImportNotes, useImportNotes } from "../../storeImportNotes";
-import { getProcessSteps, getShopSettings } from "../../settingsStore";
+import { getProcessSteps, getShopSettings, useShopSettings } from "../../settingsStore";
 import { invoke } from "../../tauriInvoke";
 import { Order, PartUnit, Printer, Product, ShopSnapshot, TransitionRequest } from "../../types";
 import { isThumbnailOnlyUnit } from "../../partThumbnails";
@@ -46,12 +47,30 @@ export const AllOrdersBoardView: React.FC<{
   onFlashBanner,
   onPrintKittingCards,
 }) => {
-  const [boardDensity, setBoardDensity] = useState<"stamps" | "small" | "medium" | "large">("medium");
+  const [boardDensity, setBoardDensity] = usePersistentState(
+    "orders.boardDensity",
+    "medium",
+    ["stamps", "small", "medium", "large"] as const,
+  );
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [personFilter, setPersonFilter] = useState<string>("ALL");
-  const [holdFilter, setHoldFilter] = useState<"ALL" | "HOLD">("ALL");
-  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "customerAZ" | "rushFirst" | "completion">("newest");
+  const shopSettings = useShopSettings();
+  const statusFilterAllowed = useMemo(
+    () => ["ALL", ...getProcessSteps().map((s) => s.id)],
+    [shopSettings.process_steps],
+  );
+  const [statusFilter, setStatusFilter] = usePersistentState("orders.statusFilter", "ALL", statusFilterAllowed);
+  const customerNames = useMemo(
+    () => Array.from(new Set(activeOrders.map((o) => o.customer_name))).sort((a, b) => a.localeCompare(b)),
+    [activeOrders]
+  );
+  const personFilterAllowed = useMemo(() => ["ALL", ...customerNames], [customerNames]);
+  const [personFilter, setPersonFilter] = usePersistentState("orders.personFilter", "ALL", personFilterAllowed);
+  const [holdFilter, setHoldFilter] = usePersistentState("orders.holdFilter", "ALL", ["ALL", "HOLD"] as const);
+  const [sortBy, setSortBy] = usePersistentState(
+    "orders.sortBy",
+    "newest",
+    ["newest", "oldest", "customerAZ", "rushFirst", "completion"] as const,
+  );
 
   // Multi-select orders (OrdersListView.swift selectedOrderIds)
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -120,11 +139,6 @@ export const AllOrdersBoardView: React.FC<{
   const [dismissedRows, setDismissedRows] = useState<DismissedAttentionRow[]>([]);
   const [showDismissedGroup, setShowDismissedGroup] = useState(false);
   const importNotes = useImportNotes();
-
-  const customerNames = useMemo(
-    () => Array.from(new Set(activeOrders.map((o) => o.customer_name))).sort((a, b) => a.localeCompare(b)),
-    [activeOrders]
-  );
 
   const filteredOrders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
