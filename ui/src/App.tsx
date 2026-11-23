@@ -23,7 +23,7 @@ import {
   TopHeader,
 } from "./components/DockAndHeader";
 import { CreatedCatalogProductPayload, partIconCameraToJson } from "./components/productImport/importTypes";
-import { NewOrderSheet, ProductImportModal3D, preload3D } from "./lazy3D";
+import { NewOrderSheet, PlateView, ProductImportModal3D, preload3D } from "./lazy3D";
 import { AllOrdersView, AndonBoardView } from "./views/OrdersRoutes";
 import {
   ProductsCatalogView,
@@ -170,6 +170,8 @@ export default function App() {
   // Print! asks which printer gets the job before anything goes to the slicer. The same
   // picker offers Mark Printing: the same job and history, with no .3mf and no slicer.
   const [pendingPrint, setPendingPrint] = useState<PendingPrintPick | null>(null);
+  // The optional plate view ("Arrange plate…" in the picker). Cancel goes back to the picker.
+  const [plateView, setPlateView] = useState<PendingPrintPick | null>(null);
   const runTransition = async (req: TransitionRequest, opts?: TransitionOptions) => {
     const o: TransitionOptions = opts && typeof opts === "object" ? opts : {};
     if (!o.confirmed && req.to_state === "Printing" && !req.failure_reason) {
@@ -183,7 +185,7 @@ export default function App() {
     try {
       const updated = await invoke<ShopSnapshot>(
         "transition_units",
-        transitionArgs(req, { allowWithoutSlicer: o.allowWithoutSlicer, skipSlicer: o.markPrinting })
+        transitionArgs(req, { allowWithoutSlicer: o.allowWithoutSlicer, skipSlicer: o.markPrinting, layout: o.layout })
       );
       setSnapshot(updated);
       setActiveUnitMenu(null);
@@ -201,7 +203,7 @@ export default function App() {
           confirmLabel: "Mark Printing anyway",
           cancelLabel: "Leave in queue",
         });
-        if (anyway) void runTransition(req, { confirmed: true, allowWithoutSlicer: true });
+        if (anyway) void runTransition(req, { confirmed: true, allowWithoutSlicer: true, layout: o.layout });
         else flashError("Nothing was moved to Printing.");
         return;
       }
@@ -713,7 +715,31 @@ export default function App() {
               markPrinting: mode === "mark",
             });
           }}
+          onArrange={() => {
+            if (!canConfirmPick("print", pendingPrint.printerId, snapshot.printers)) return;
+            setPlateView(pendingPrint);
+            setPendingPrint(null);
+          }}
         />
+      )}
+      {plateView && (
+        <Suspense fallback={null}>
+          <PlateView
+            unitIds={plateView.req.unit_ids}
+            printers={snapshot.printers}
+            printerId={plateView.printerId}
+            onCancel={() => {
+              setPendingPrint(plateView);
+              setPlateView(null);
+            }}
+            onSend={({ unitIds, printerId, layout }) => {
+              // Parts removed in the plate view leave this job only; they stay in Parts to Print.
+              const req = { ...plateView.req, unit_ids: unitIds };
+              setPlateView(null);
+              void runTransition(confirmedPickRequest(req, "print", printerId, snapshot.printers), { confirmed: true, layout });
+            }}
+          />
+        </Suspense>
       )}
       {useSidebar && !andonWallMode && (
         <SidebarNav

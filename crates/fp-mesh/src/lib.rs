@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
+pub mod plate;
 pub mod slice_info;
 pub use slice_info::{
     parse_slice_info_config, per_object_estimates, read_slice_info_from_3mf, SlicedObjectEstimate,
@@ -833,6 +834,10 @@ pub struct PlateOptions {
     pub loaded_slots: Vec<PlateSlot>,
     /// Swatch identity per item, index-aligned with the items. Missing entries match by hex.
     pub item_filaments: Vec<PlateItemFilament>,
+    /// Exact 3MF build transforms (see `plate::item_transform`), index-aligned with the items.
+    /// When given, parts are written where the plate view put them (position and rotation)
+    /// and the row layout and its fit checks are skipped.
+    pub transforms: Vec<[f64; 12]>,
 }
 
 impl From<PlateBed> for PlateOptions {
@@ -1058,48 +1063,54 @@ pub fn write_3mf_plate_with(
         // STL stores every triangle with its own three corners. 3MF needs shared corners, or the
         // slicer sees every edge as open. Weld identical corners, then drop collapsed triangles.
         let welded: Vec<WeldedMesh> = items.iter().map(|it| weld_mesh(&it.mesh)).collect();
+        let use_transforms = !opts.transforms.is_empty();
+        if use_transforms && opts.transforms.len() != items.len() {
+            return Err("The plate layout doesn't match the parts.".to_string());
+        }
         // Lay parts out on a grid by their real size, each sitting on the bed at z = 0.
         let mut placements: Vec<(f32, f32, f32)> = Vec::new();
-        {
-            let gap = 6.0f32;
-            let (mut cx, mut cy, mut row_h) = (0.0f32, 0.0f32, 0.0f32);
-            let row_limit = bed.width_mm;
-            for (pos, _) in &welded {
-                let (mut mn, mut mx) = ([f32::MAX; 3], [f32::MIN; 3]);
-                for v in pos {
-                    for k in 0..3 {
-                        mn[k] = mn[k].min(v[k]);
-                        mx[k] = mx[k].max(v[k]);
+        if !use_transforms {
+            {
+                let gap = 6.0f32;
+                let (mut cx, mut cy, mut row_h) = (0.0f32, 0.0f32, 0.0f32);
+                let row_limit = bed.width_mm;
+                for (pos, _) in &welded {
+                    let (mut mn, mut mx) = ([f32::MAX; 3], [f32::MIN; 3]);
+                    for v in pos {
+                        for k in 0..3 {
+                            mn[k] = mn[k].min(v[k]);
+                            mx[k] = mx[k].max(v[k]);
+                        }
                     }
+                    if pos.is_empty() {
+                        mn = [0.0; 3];
+                        mx = [0.0; 3];
+                    }
+                    let (w, d) = (mx[0] - mn[0], mx[1] - mn[1]);
+                    // A known bed (finite depth) can't take a part wider than it. The default
+                    // bed is "size unknown", so it never rejects a part.
+                    if bed.depth_mm.is_finite() && w > bed.width_mm {
+                        return Err(format!(
+                            "A part is about {:.0} mm wide, but the printer's bed is {:.0} mm wide.",
+                            w, bed.width_mm
+                        ));
+                    }
+                    if cx > 0.0 && cx + w > row_limit {
+                        cx = 0.0;
+                        cy += row_h + gap;
+                        row_h = 0.0;
+                    }
+                    placements.push((cx - mn[0], cy - mn[1], -mn[2]));
+                    cx += w + gap;
+                    row_h = row_h.max(d);
                 }
-                if pos.is_empty() {
-                    mn = [0.0; 3];
-                    mx = [0.0; 3];
-                }
-                let (w, d) = (mx[0] - mn[0], mx[1] - mn[1]);
-                // A known bed (finite depth) can't take a part wider than it. The default
-                // bed is "size unknown", so it never rejects a part.
-                if bed.depth_mm.is_finite() && w > bed.width_mm {
+                let used_depth = cy + row_h;
+                if used_depth > bed.depth_mm {
                     return Err(format!(
-                        "A part is about {:.0} mm wide, but the printer's bed is {:.0} mm wide.",
-                        w, bed.width_mm
+                        "These parts need about {:.0} mm of bed depth, but the printer's bed is {:.0} mm. Print fewer parts at once.",
+                        used_depth, bed.depth_mm
                     ));
                 }
-                if cx > 0.0 && cx + w > row_limit {
-                    cx = 0.0;
-                    cy += row_h + gap;
-                    row_h = 0.0;
-                }
-                placements.push((cx - mn[0], cy - mn[1], -mn[2]));
-                cx += w + gap;
-                row_h = row_h.max(d);
-            }
-            let used_depth = cy + row_h;
-            if used_depth > bed.depth_mm {
-                return Err(format!(
-                    "These parts need about {:.0} mm of bed depth, but the printer's bed is {:.0} mm. Print fewer parts at once.",
-                    used_depth, bed.depth_mm
-                ));
             }
         }
         for (idx, item) in items.iter().enumerate() {
@@ -1142,10 +1153,19 @@ pub fn write_3mf_plate_with(
         );
         for (idx, _) in items.iter().enumerate() {
             let obj_id = idx + 1;
-            let (tx, ty, tz) = placements[idx];
+            let transform = if use_transforms {
+                opts.transforms[idx]
+                    .iter()
+                    .map(|v| format!("{:.6}", if v.abs() < 1e-12 { 0.0 } else { *v }))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                let (tx, ty, tz) = placements[idx];
+                format!("1 0 0 0 1 0 0 0 1 {:.4} {:.4} {:.4}", tx, ty, tz)
+            };
             model_xml.push_str(&format!(
-                "    <item objectid=\"{}\" transform=\"1 0 0 0 1 0 0 0 1 {:.4} {:.4} {:.4}\"/>\n",
-                obj_id, tx, ty, tz
+                "    <item objectid=\"{}\" transform=\"{}\"/>\n",
+                obj_id, transform
             ));
         }
         model_xml.push_str(

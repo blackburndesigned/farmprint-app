@@ -405,6 +405,22 @@ impl ShopLedger {
             .unwrap_or((None, None)))
     }
 
+    /// A printer's build volume `(x, y, z)` in mm; each is None when unset.
+    pub fn printer_build_volume_mm(
+        &self,
+        printer_id: &str,
+    ) -> CoreResult<(Option<f64>, Option<f64>, Option<f64>)> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT bed_x_mm, bed_y_mm, bed_z_mm FROM printers WHERE id = ?1",
+                params![printer_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?
+            .unwrap_or((None, None, None)))
+    }
+
     /// The filaments loaded on a printer, by slot (1-based, as Settings shows "Slot 1").
     /// Empty when the printer has none loaded or doesn't exist. A slot whose swatch was
     /// deleted keeps its id with an empty name, hex and material.

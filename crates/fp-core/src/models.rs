@@ -581,6 +581,10 @@ pub struct ShopSettings {
     pub printer_accents: std::collections::BTreeMap<String, String>,
     // Printers: printer_id -> has a multi-spool switcher (AMS or similar)
     pub printer_multi_spool: std::collections::BTreeMap<String, bool>,
+    /// Printers: printer_id -> plate view settings, remembered per printer:
+    /// `spacing_mm`, `auto_rotate`, `align_y`, `sequence` ("by_layer" | "by_object"),
+    /// `clearance_radius_mm`, `clearance_height_mm`. Missing keys use the plate defaults.
+    pub printer_plate: std::collections::BTreeMap<String, serde_json::Value>,
     /// Printers board grouping: "job" (each send/Print! batch as it was sent) | "order".
     /// "" = "job".
     pub printers_board_view: String,

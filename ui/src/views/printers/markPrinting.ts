@@ -53,10 +53,12 @@ export function confirmedPickRequest(
 /** Arguments for the `transition_units` command. `skip_slicer` is only ever sent for Mark Printing. */
 export function transitionArgs(
   req: TransitionRequest,
-  opts: { allowWithoutSlicer?: boolean; skipSlicer?: boolean } = {}
+  opts: { allowWithoutSlicer?: boolean; skipSlicer?: boolean; layout?: unknown } = {}
 ): Record<string, unknown> {
   const args: Record<string, unknown> = { request: req, allow_without_slicer: !!opts.allowWithoutSlicer };
   if (opts.skipSlicer) args.skip_slicer = true;
+  // From the plate view: send exactly this layout. Without it, Print! arranges automatically.
+  else if (opts.layout) args.layout = opts.layout;
   return args;
 }
 
@@ -68,4 +70,6 @@ export interface TransitionOptions {
   allowWithoutSlicer?: boolean;
   /** Mark Printing: open the picker in Mark Printing mode / send with no slicer. */
   markPrinting?: boolean;
+  /** Print! from the plate view: the parts' plates, positions and turns (plateModel.PrintLayout). */
+  layout?: unknown;
 }

@@ -153,7 +153,7 @@ export interface Printer {
   bed_x_mm?: number | null;
   /** Bed depth (Y) in mm; null/absent = unknown (use the 220 mm default). */
   bed_y_mm?: number | null;
-  /** Build height (Z) in mm; null/absent = not set. Not used by plate building or Print!. */
+  /** Build height (Z) in mm; null/absent = not set. Print! and the plate view flag parts taller than this. */
   bed_z_mm?: number | null;
   /** Units holding this printer's spools, in order. Absent on older snapshots. */
   feeders?: PrinterFeeder[];
@@ -310,6 +310,9 @@ export interface ShopSettings {
   units?: string;
   currency?: string;
   printer_multi_spool?: Record<string, boolean>;
+  /** Printers: printer id -> plate view settings remembered per printer (spacing, auto-rotate,
+   *  align to Y, print sequence, by-object clearance). Missing keys use the plate defaults. */
+  printer_plate?: Record<string, Partial<import("./views/printers/plate/plateModel").ArrangeSettings>>;
   /** Printers board grouping: "job" | "order" ("" = "job"). */
   printers_board_view?: string;
   /** Suggested Groups shows a small printer hint. Default off. */

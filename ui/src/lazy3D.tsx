@@ -8,10 +8,12 @@ const loadProductEditor = () => import("./components/ProductImportModal3D");
 const loadNewOrderSheet = () => import("./views/NewOrderSheet");
 const loadOrderLine3DViewer = () => import("./components/OrderLine3DViewer");
 const loadOrderViewport = () => import("./components/OrderViewport3D");
+const loadPlateView = () => import("./views/printers/plate/PlateView");
 
 export const ProductImportModal3D = React.lazy(() => loadProductEditor().then((m) => ({ default: m.ProductImportModal3D })));
 export const NewOrderSheet = React.lazy(() => loadNewOrderSheet().then((m) => ({ default: m.NewOrderSheet })));
 export const OrderLine3DViewer = React.lazy(() => loadOrderLine3DViewer().then((m) => ({ default: m.OrderLine3DViewer })));
+export const PlateView = React.lazy(() => loadPlateView().then((m) => ({ default: m.PlateView })));
 export const OrderRePoseModal = React.lazy(() => loadOrderViewport().then((m) => ({ default: m.OrderRePoseModal })));
 
 /** Offscreen order-line render (website orders, recolors), loaded with the 3D chunk. */
