@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { Printer, TransitionRequest } from "../../types";
 import { plateFitSummary } from "./plate/plateApi";
-import type { FitSummary } from "./plate/plateModel";
+import { printBlockReason, type FitSummary } from "./plate/plateModel";
 import { FitChip, PlateFitSummary } from "./plate/PlateFitSummary";
 import { CircleDashed, CirclePlay, Printer as PrinterIcon } from "lucide-react";
 import { Icon } from "../../icons";
@@ -58,7 +58,9 @@ export const PrinterPickModal: React.FC<{
   }, [mark, unitKey, printerKey]);
   const picked = printers.find((p) => p.id === pending.printerId);
   const pickedFit = picked ? fit?.[picked.id] : undefined;
-  const pickedTooBig = !!pickedFit && (pickedFit.check.off_plate.length > 0 || pickedFit.check.too_tall.length > 0);
+  // Print! is greyed out when the automatic layout can't be sent (too big, or no nozzle
+  // area fits a part); the reason is shown next to the button.
+  const blockReason = printBlockReason(pickedFit?.check);
   const bedText = (p: Printer) =>
     p.bed_x_mm && p.bed_y_mm ? `${Math.round(p.bed_x_mm)} × ${Math.round(p.bed_y_mm)}${p.bed_z_mm ? ` × ${Math.round(p.bed_z_mm)}` : ""} mm` : "";
   const row = (id: string, body: React.ReactNode) => (
@@ -128,7 +130,12 @@ export const PrinterPickModal: React.FC<{
               onArrange={() => onArrange?.()}
             />
           )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            {!mark && blockReason && (
+              <span className="fp-print-block-reason" role="note" style={{ marginRight: "auto", fontSize: 12, color: "var(--danger, #d2403a)", maxWidth: 230, lineHeight: 1.3 }}>
+                {blockReason}
+              </span>
+            )}
             <button type="button" className="fp-btn fp-btn-sm" onClick={onCancel}>Cancel</button>
             <button
               type="button"
@@ -143,8 +150,8 @@ export const PrinterPickModal: React.FC<{
               <button
                 type="button"
                 className="fp-btn fp-btn-sm fp-btn-primary"
-                disabled={!canPrint || pickedTooBig}
-                title={pickedTooBig ? "A part doesn't fit this printer. Pick another printer or open Arrange plate…" : canPrint ? "Arrange the plate automatically and open it in the slicer" : "Pick a printer first"}
+                disabled={!canPrint || !!blockReason}
+                title={blockReason ?? (canPrint ? "Arrange the plate automatically and open it in the slicer" : "Pick a printer first")}
                 onClick={() => onConfirm("print")}
               >
                 <Icon icon={PrinterIcon} size={14} /> Print!
