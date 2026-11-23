@@ -2,7 +2,7 @@
 // that are not loaded. Older snapshots without feeders read as one default feeder.
 import {
   addFeederDraft, draftsFromFeeders, feederBrandLine, feederCaption, feederCells, feederDraftsChanged, feederDraftsProblem,
-  feederPayload, feedersOf, feedingCapacity, loadIntoFeeders, moveFeederDraft, slotHoverTitle, spoolsUnloadedBy,
+  feederPayload, feedersOf, feedingCapacity, loadIntoFeeders, moveFeederDraft, slotChipText, slotHoverTitle, spoolsUnloadedBy, swatchRing,
 } from "../../src/views/printers/printerFeeders";
 import type { PrinterFeeder, PrinterSlot } from "../../src/types";
 import { check, done } from "./check";
@@ -53,6 +53,16 @@ check(
   slotHoverTitle(feeders[0], { position: 1, slotNumber: 1, spool: null }) === "Left · Slot 1: Empty",
   "an empty slot hover says Empty",
 );
+
+// Slot chips: type and brand sit with the swatch; blanks read clearly.
+check(JSON.stringify(slotChipText(branded.spools[1])) === JSON.stringify({ type: "PETG", brand: "Northline" }), "a chip shows the spool's type and brand");
+check(slotChipText(slot(1, "a", { brand: " ", material: " " })).brand === "No brand", "a chip with no brand says No brand");
+check(slotChipText(slot(1, "a", { material: "" })).type === "\u2014", "a chip with no type shows a dash");
+check(slotChipText(null).type === "Empty" && slotChipText(null).brand === "", "an empty chip says Empty");
+check(swatchRing("#FFFFFF") === "light" && swatchRing("#f5f5f0") === "light", "near-white swatches get a dark ring");
+check(swatchRing("#000000") === "dark" && swatchRing("#111") === "dark", "near-black swatches get a light ring");
+check(swatchRing("#2563eb") === null && swatchRing("#d97706cc") === null, "mid colors need no ring");
+check(swatchRing("") === null && swatchRing("nope") === null, "unreadable colors get no ring");
 
 
 // Loading goes to the first empty feeding slot and never past the last feeder.

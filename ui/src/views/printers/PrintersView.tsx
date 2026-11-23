@@ -246,7 +246,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
       {!wallMode && <StatusLegendHeader />}
 
       {wallMode ? (
-        <div className="fp-scroll" style={{ flex: 1, padding: "14px 18px 88px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16, alignContent: "start" }}>
+        <div className="fp-scroll" style={{ flex: 1, padding: "14px 18px 88px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gridAutoRows: "max-content", gap: 16, alignContent: "start", alignItems: "start" }}>
           {lanes.map((printer, idx) => {
             const accent = isUnassignedLane(printer) ? UNASSIGNED_ACCENT : printerAccent(printer.id) || printer.loaded_slots[0]?.filament_hex || LANE_COLORS[idx % LANE_COLORS.length];
             const laneUnits = laneUnitsFor(printer);
@@ -330,7 +330,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                     Marked Printing with no printer · use Assign to pick one
                   </div>
                 ) : (
-                <div onClick={() => setEditingPrinterSlotsId(printer.id)} title="Click to change loaded filament spools and feeders" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.06)", overflowX: "auto", cursor: "pointer" }}>
+                <div className="fp-feeder-strip" onClick={() => setEditingPrinterSlotsId(printer.id)} title="Click to change loaded filament spools and feeders" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", scrollPaddingLeft: 8, background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.06)", cursor: "pointer" }}>
                   <FeederBoxes feeders={feedersOf(printer)} variant="lane" />
                   {feedersOf(printer).every((f) => f.spools.length === 0) && (
                     <span style={{ fontSize: 11, color: "rgba(235,235,245,0.55)", whiteSpace: "nowrap" }}>Tap to load spools</span>
