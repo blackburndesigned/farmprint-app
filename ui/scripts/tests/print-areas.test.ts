@@ -2,7 +2,7 @@
 // only part of it, and the Settings editor's drafts. Mirrors fp-core `print_areas` tests.
 import {
   addAreaDraft, areaDraftsChanged, areaDraftsProblem, areaFitWarning, areaOverBed, areaPayload, draftsFromAreas, hasPrintAreas,
-  nozzleNeedForSlots, printAreaForFeeders, printAreaForSlots,
+  nozzleNeedForSlots, overlapArea, partAreaOf, printAreaForFeeders, printAreaForSlots, sharedArea,
 } from "../../src/views/printers/printAreas";
 import { draftsFromFeeders, feederPayload } from "../../src/views/printers/printerFeeders";
 import type { PrintArea, Printer, PrinterFeeder } from "../../src/types";
@@ -21,7 +21,10 @@ const feeders: PrinterFeeder[] = [
   { id: "f3", name: "Feeder 3", slot_count: 1, is_dry_box: false, first_slot: 9, spools: [] },
 ];
 const p: Pick<Printer, "feeders" | "print_areas"> = { feeders, print_areas: areas };
-const name = (slots: number[]) => printAreaForSlots(p, slots)?.name ?? "whole bed";
+const name = (slots: number[]) => {
+  const r = printAreaForSlots(p, slots);
+  return r.kind === "area" ? r.area.name : r.kind;
+};
 
 check(name([1, 4]) === "Left nozzle", "all left-nozzle slots -> left area");
 check(name([5, 8]) === "Right nozzle", "all right-nozzle slots -> right area");
@@ -29,15 +32,32 @@ check(name([2, 6]) === "Both nozzles", "mixed -> both area");
 check(name([9]) === "Both nozzles" && name([1, 9]) === "Both nozzles", "a slot with no nozzle -> both area");
 check(name([40]) === "Both nozzles" && name([]) === "Both nozzles", "unknown slot or no slots -> both area");
 check(nozzleNeedForSlots(p, [2, 3]) === "left" && nozzleNeedForSlots(p, [3, 6]) === "both", "nozzle need");
-check(printAreaForFeeders(p, ["f1"])?.name === "Left nozzle" && printAreaForFeeders(p, ["f1", "f2"])?.name === "Both nozzles", "by feeder id");
-check(printAreaForFeeders(p, ["d1"])?.name === "Both nozzles", "a dry box counts as unknown");
+check(partAreaOf(printAreaForFeeders(p, ["f1"]))?.name === "Left nozzle" && partAreaOf(printAreaForFeeders(p, ["f1", "f2"]))?.name === "Both nozzles", "by feeder id");
+check(partAreaOf(printAreaForFeeders(p, ["d1"]))?.name === "Both nozzles", "a dry box counts as unknown");
 
 const noRight = { feeders, print_areas: areas.filter((a) => a.nozzle !== "right") };
-check(printAreaForSlots(noRight, [5])?.name === "Both nozzles", "missing right area falls back to both");
-const noBoth = { feeders, print_areas: areas.filter((a) => a.nozzle !== "both") };
-check(printAreaForSlots(noBoth, [1, 5]) === null && printAreaForSlots(noBoth, [9]) === null, "no both area -> whole bed");
-check(printAreaForSlots({ feeders, print_areas: [] }, [1]) === null, "no areas -> whole bed");
-check(printAreaForSlots({ feeders }, [1]) === null, "older snapshot without print_areas -> whole bed");
+check(partAreaOf(printAreaForSlots(noRight, [5]))?.name === "Both nozzles", "missing right area falls back to both");
+check(printAreaForSlots({ feeders, print_areas: [] }, [1]).kind === "bed", "no areas -> whole bed");
+check(printAreaForSlots({ feeders }, [1]).kind === "bed", "older snapshot without print_areas -> whole bed");
+
+// No "both" area: the overlap of left and right (offsets typed by the user).
+const L = (x: number, y: number, w: number, d: number, h: number, nozzle: PrintArea["nozzle"] = "left"): PrintArea =>
+  ({ id: `${nozzle}-${x}`, name: nozzle, nozzle, width_mm: w, depth_mm: d, height_mm: h, x_mm: x, y_mm: y });
+const lr = { feeders, print_areas: [L(0, 0, 325, 320, 320), L(25, 5, 305, 320, 325, "right")] };
+const ov = overlapArea(lr);
+check(!!ov && ov.id === "overlap" && ov.name === "Overlap" && ov.nozzle === "both" && ov.x_mm === 25 && ov.y_mm === 5 && ov.width_mm === 300 && ov.depth_mm === 315 && ov.height_mm === 320, `overlap rectangle: ${JSON.stringify(ov)}`);
+check(sharedArea(lr)?.id === "overlap", "shared area is the overlap without a both area");
+check([[1, 5], [9], []].every((s) => partAreaOf(printAreaForSlots(lr, s))?.id === "overlap"), "mixed, unknown and no slots -> overlap");
+check(partAreaOf(printAreaForSlots(lr, [1]))?.nozzle === "left" && partAreaOf(printAreaForSlots(lr, [5]))?.nozzle === "right", "one-nozzle parts keep their area");
+const leftOnly = { feeders, print_areas: [L(0, 0, 325, 320, 320)] };
+check(overlapArea(leftOnly) === null && printAreaForSlots(leftOnly, [5]).kind === "unreachable" && printAreaForSlots(leftOnly, [1, 5]).kind === "unreachable", "only a left area: right and shared parts are unreachable");
+check(partAreaOf(printAreaForSlots(leftOnly, [1]))?.nozzle === "left", "only a left area: left parts still placed");
+const apart = { feeders, print_areas: [L(0, 0, 100, 100, 100), L(100, 0, 100, 100, 100, "right")] };
+check(overlapArea(apart) === null && printAreaForSlots(apart, [1, 5]).kind === "unreachable" && printAreaForSlots(apart, [1]).kind === "area", "areas that only touch don't overlap");
+const many = { feeders, print_areas: [...lr.print_areas, L(0, 0, 200, 320, 300)] };
+const ov2 = overlapArea(many);
+check(!!ov2 && ov2.x_mm === 25 && ov2.width_mm === 175 && ov2.height_mm === 300, "every left and right area intersects");
+check(partAreaOf(printAreaForSlots({ feeders, print_areas: [...many.print_areas, L(50, 0, 100, 100, 100, "both")] }, [1, 5]))?.x_mm === 50, "a both area wins over the overlap");
 check(!hasPrintAreas({}) && !hasPrintAreas({ print_areas: [] }) && hasPrintAreas(p), "hasPrintAreas");
 
 // Editor drafts.

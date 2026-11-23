@@ -175,39 +175,124 @@ fn need_from(nozzles: impl Iterator<Item = Option<FeederNozzle>>) -> NozzleNeed 
     }
 }
 
-/// The print area a part must sit in, or None for the whole bed.
+/// Id and name of the area synthesized from the left and right areas when a printer has
+/// no "both" area (see [`overlap_area`]).
+pub const OVERLAP_AREA_ID: &str = "overlap";
+pub const OVERLAP_AREA_NAME: &str = "Overlap";
+
+/// Where a part may sit on a printer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PartArea {
+    /// The printer has no print areas: the whole bed, exactly as before print areas.
+    Bed,
+    /// Inside this area: a saved one, or the synthesized overlap (id [`OVERLAP_AREA_ID`]).
+    Area(PrintArea),
+    /// The printer has print areas, but none the part's nozzles can reach (for example no
+    /// "both" area and the left and right areas don't overlap). The caller should flag it.
+    Unreachable,
+}
+
+impl PartArea {
+    /// The area, if the part has one (None for `Bed` and `Unreachable`).
+    pub fn area(&self) -> Option<&PrintArea> {
+        match self {
+            PartArea::Area(a) => Some(a),
+            _ => None,
+        }
+    }
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, PartArea::Unreachable)
+    }
+}
+
+/// The rectangle both nozzles reach when the printer has no "both" area: the intersection
+/// of every left and every right area (x/y rectangle intersection, height = the smallest).
+/// None unless there is at least one left and one right area and they overlap.
+pub fn overlap_area(printer: &Printer) -> Option<PrintArea> {
+    let one_nozzle: Vec<&PrintArea> = printer
+        .print_areas
+        .iter()
+        .filter(|a| a.nozzle != AreaNozzle::Both)
+        .collect();
+    let has = |n: AreaNozzle| one_nozzle.iter().any(|a| a.nozzle == n);
+    if !has(AreaNozzle::Left) || !has(AreaNozzle::Right) {
+        return None;
+    }
+    let (mut x0, mut y0, mut x1, mut y1, mut h) = (
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::INFINITY,
+    );
+    for a in &one_nozzle {
+        x0 = x0.max(a.x_mm);
+        y0 = y0.max(a.y_mm);
+        x1 = x1.min(a.x_mm + a.width_mm);
+        y1 = y1.min(a.y_mm + a.depth_mm);
+        h = h.min(a.height_mm);
+    }
+    let (w, d) = (x1 - x0, y1 - y0);
+    if !(w > 1e-9 && d > 1e-9 && h > 0.0) {
+        return None;
+    }
+    Some(PrintArea {
+        id: OVERLAP_AREA_ID.to_string(),
+        name: OVERLAP_AREA_NAME.to_string(),
+        nozzle: AreaNozzle::Both,
+        width_mm: w,
+        depth_mm: d,
+        height_mm: h,
+        x_mm: x0,
+        y_mm: y0,
+    })
+}
+
+/// The area both nozzles reach: the first "both" area, else [`overlap_area`].
+pub fn shared_area(printer: &Printer) -> Option<PrintArea> {
+    printer
+        .print_areas
+        .iter()
+        .find(|a| a.nozzle == AreaNozzle::Both)
+        .cloned()
+        .or_else(|| overlap_area(printer))
+}
+
+/// Where a part must sit.
 ///
 /// For the plate view and arrange, per part: pass the printer slot numbers the part prints
 /// with. All slots on left-nozzle feeders -> the first "left" area; all on right-nozzle
-/// feeders -> the first "right" area; a mix -> the first "both" area. When the matching
-/// one-nozzle area is missing, the "both" area is used (both nozzles reach it). A slot with
-/// no nozzle set (or no slots at all) -> the "both" area. No suitable area -> None, the
-/// whole bed, which is also what every printer without print areas gets.
+/// feeders -> the first "right" area; a mix, a slot with no nozzle set, or no slots -> the
+/// shared area. The shared area is the first "both" area, else the overlap of the left and
+/// right areas ([`overlap_area`]). A part whose one-nozzle area is missing also gets the
+/// shared area. Nothing reachable -> `Unreachable`. `Bed` (the whole bed) only when the
+/// printer has no print areas at all.
 ///
-/// The area's rectangle on the bed is `x_mm..x_mm + width_mm` by `y_mm..y_mm + depth_mm`,
+/// An area's rectangle on the bed is `x_mm..x_mm + width_mm` by `y_mm..y_mm + depth_mm`,
 /// measured from the bed's front-left corner, and parts must be no taller than `height_mm`.
-pub fn print_area_for_slots<'a>(
-    printer: &'a Printer,
-    slot_indexes: &[i64],
-) -> Option<&'a PrintArea> {
+pub fn print_area_for_slots(printer: &Printer, slot_indexes: &[i64]) -> PartArea {
     print_area_for_need(printer, nozzle_need_for_slots(printer, slot_indexes))
 }
 
 /// [`print_area_for_slots`] keyed by feeder ids instead of slot numbers.
-pub fn print_area_for_feeders<'a>(
-    printer: &'a Printer,
-    feeder_ids: &[&str],
-) -> Option<&'a PrintArea> {
+pub fn print_area_for_feeders(printer: &Printer, feeder_ids: &[&str]) -> PartArea {
     print_area_for_need(printer, nozzle_need_for_feeders(printer, feeder_ids))
 }
 
 /// The area for a known nozzle need (see [`print_area_for_slots`]).
-pub fn print_area_for_need(printer: &Printer, need: NozzleNeed) -> Option<&PrintArea> {
-    let find = |n: AreaNozzle| printer.print_areas.iter().find(|a| a.nozzle == n);
-    match need {
-        NozzleNeed::Left => find(AreaNozzle::Left).or_else(|| find(AreaNozzle::Both)),
-        NozzleNeed::Right => find(AreaNozzle::Right).or_else(|| find(AreaNozzle::Both)),
-        NozzleNeed::Both | NozzleNeed::Unknown => find(AreaNozzle::Both),
+pub fn print_area_for_need(printer: &Printer, need: NozzleNeed) -> PartArea {
+    if printer.print_areas.is_empty() {
+        return PartArea::Bed;
+    }
+    let find = |n: AreaNozzle| printer.print_areas.iter().find(|a| a.nozzle == n).cloned();
+    let own = match need {
+        NozzleNeed::Left => find(AreaNozzle::Left),
+        NozzleNeed::Right => find(AreaNozzle::Right),
+        NozzleNeed::Both | NozzleNeed::Unknown => None,
+    };
+    match own.or_else(|| shared_area(printer)) {
+        Some(a) => PartArea::Area(a),
+        None => PartArea::Unreachable,
     }
 }
 
@@ -373,8 +458,10 @@ mod tests {
             .all(|p| p.feeders.iter().all(|f| f.nozzle.is_none())));
         // No areas: every part gets the whole bed.
         let p = &snap.printers[0];
-        assert_eq!(print_area_for_slots(p, &[1, 2]), None);
-        assert_eq!(print_area_for_slots(p, &[]), None);
+        assert_eq!(print_area_for_slots(p, &[1, 2]), PartArea::Bed);
+        assert_eq!(print_area_for_slots(p, &[]), PartArea::Bed);
+        assert_eq!(print_area_for_need(p, NozzleNeed::Left), PartArea::Bed);
+        assert_eq!(shared_area(p), None);
     }
 
     #[test]
@@ -605,7 +692,11 @@ mod tests {
     #[test]
     fn a_part_sits_in_the_area_its_nozzles_reach() {
         let p = dual_printer();
-        let name = |slots: &[i64]| print_area_for_slots(&p, slots).map(|a| a.name.clone());
+        let name = |slots: &[i64]| {
+            print_area_for_slots(&p, slots)
+                .area()
+                .map(|a| a.name.clone())
+        };
         assert_eq!(name(&[1, 4]).as_deref(), Some("Left nozzle"));
         assert_eq!(name(&[5, 8]).as_deref(), Some("Right nozzle"));
         assert_eq!(name(&[1, 5]).as_deref(), Some("Both nozzles"));
@@ -619,7 +710,7 @@ mod tests {
         assert_eq!(nozzle_need_for_slots(&p, &[9]), NozzleNeed::Unknown);
 
         let ids: Vec<String> = p.feeders.iter().map(|f| f.id.clone()).collect();
-        let by_feeder = |f: &[&str]| print_area_for_feeders(&p, f).map(|a| a.name.clone());
+        let by_feeder = |f: &[&str]| print_area_for_feeders(&p, f).area().map(|a| a.name.clone());
         assert_eq!(by_feeder(&[&ids[0]]).as_deref(), Some("Left nozzle"));
         assert_eq!(by_feeder(&[&ids[1]]).as_deref(), Some("Right nozzle"));
         assert_eq!(
@@ -631,23 +722,100 @@ mod tests {
     }
 
     #[test]
-    fn missing_areas_fall_back_to_both_then_the_whole_bed() {
+    fn missing_areas_fall_back_to_the_shared_area_or_the_overlap() {
         let mut p = dual_printer();
-        // No right-nozzle area: right-only parts use the shared area.
+        let nozzle = |p: &Printer, s: &[i64]| print_area_for_slots(p, s).area().map(|a| a.nozzle);
+        // No right-nozzle area: right-only parts use the "both" area.
         p.print_areas.retain(|a| a.nozzle != AreaNozzle::Right);
+        assert_eq!(nozzle(&p, &[5]), Some(AreaNozzle::Both));
+        // Only a left area: right-only, mixed and unknown parts can't be placed.
+        p.print_areas.retain(|a| a.nozzle == AreaNozzle::Left);
+        assert_eq!(nozzle(&p, &[1]), Some(AreaNozzle::Left));
+        for s in [&[5][..], &[1, 5], &[9], &[]] {
+            assert_eq!(print_area_for_slots(&p, s), PartArea::Unreachable, "{s:?}");
+        }
+        assert!(print_area_for_slots(&p, &[5]).is_unreachable());
+        assert_eq!(print_area_for_slots(&p, &[5]).area(), None);
+    }
+
+    fn rect(nozzle: AreaNozzle, x: f64, y: f64, w: f64, d: f64, h: f64) -> PrintArea {
+        PrintArea {
+            id: format!("{nozzle:?}-{x}"),
+            name: default_area_name(nozzle).into(),
+            nozzle,
+            width_mm: w,
+            depth_mm: d,
+            height_mm: h,
+            x_mm: x,
+            y_mm: y,
+        }
+    }
+
+    #[test]
+    fn without_a_both_area_shared_parts_use_the_left_right_overlap() {
+        let mut p = dual_printer();
+        // Left reaches x 0..325, right x 25..330 (offsets typed by the user).
+        p.print_areas = vec![
+            rect(AreaNozzle::Left, 0.0, 0.0, 325.0, 320.0, 320.0),
+            rect(AreaNozzle::Right, 25.0, 5.0, 305.0, 320.0, 325.0),
+        ];
+        let expect = PrintArea {
+            id: OVERLAP_AREA_ID.into(),
+            name: OVERLAP_AREA_NAME.into(),
+            nozzle: AreaNozzle::Both,
+            width_mm: 300.0,
+            depth_mm: 315.0,
+            height_mm: 320.0,
+            x_mm: 25.0,
+            y_mm: 5.0,
+        };
+        assert_eq!(overlap_area(&p), Some(expect.clone()));
+        assert_eq!(shared_area(&p), Some(expect.clone()));
+        for s in [&[1, 5][..], &[9], &[]] {
+            assert_eq!(
+                print_area_for_slots(&p, s),
+                PartArea::Area(expect.clone()),
+                "{s:?}"
+            );
+        }
+        // One-nozzle parts keep their own area.
         assert_eq!(
-            print_area_for_slots(&p, &[5]).map(|a| a.nozzle),
-            Some(AreaNozzle::Both)
+            print_area_for_slots(&p, &[1]).area().unwrap().nozzle,
+            AreaNozzle::Left
         );
-        // No shared area: mixed and unknown parts get the whole bed (None).
-        p.print_areas.retain(|a| a.nozzle != AreaNozzle::Both);
-        assert_eq!(print_area_for_slots(&p, &[1, 5]), None);
-        assert_eq!(print_area_for_slots(&p, &[9]), None);
         assert_eq!(
-            print_area_for_slots(&p, &[1]).map(|a| a.nozzle),
-            Some(AreaNozzle::Left)
+            print_area_for_slots(&p, &[5]).area().unwrap().nozzle,
+            AreaNozzle::Right
         );
-        assert_eq!(print_area_for_slots(&p, &[5]), None);
+        // Missing right area plus no both area: right part -> the overlap needs a right
+        // area too, so it's unreachable.
+        let mut left_only = p.clone();
+        left_only.print_areas.truncate(1);
+        assert_eq!(overlap_area(&left_only), None);
+        assert!(print_area_for_slots(&left_only, &[5]).is_unreachable());
+        // Several areas per nozzle: everything intersects.
+        p.print_areas
+            .push(rect(AreaNozzle::Left, 0.0, 0.0, 200.0, 320.0, 300.0));
+        let o = overlap_area(&p).unwrap();
+        assert_eq!((o.x_mm, o.width_mm, o.height_mm), (25.0, 175.0, 300.0));
+        // A "both" area wins over the overlap.
+        p.print_areas
+            .push(rect(AreaNozzle::Both, 50.0, 0.0, 100.0, 100.0, 100.0));
+        assert_eq!(print_area_for_slots(&p, &[1, 5]).area().unwrap().x_mm, 50.0);
+    }
+
+    #[test]
+    fn areas_that_do_not_overlap_leave_shared_parts_unreachable() {
+        let mut p = dual_printer();
+        p.print_areas = vec![
+            rect(AreaNozzle::Left, 0.0, 0.0, 100.0, 100.0, 100.0),
+            rect(AreaNozzle::Right, 100.0, 0.0, 100.0, 100.0, 100.0), // touching, no overlap
+        ];
+        assert_eq!(overlap_area(&p), None);
+        assert_eq!(print_area_for_slots(&p, &[1, 5]), PartArea::Unreachable);
+        assert_eq!(print_area_for_slots(&p, &[9]), PartArea::Unreachable);
+        assert_eq!(print_area_for_slots(&p, &[1]).area().unwrap().x_mm, 0.0);
+        assert_eq!(print_area_for_feeders(&p, &["nope"]), PartArea::Unreachable);
     }
 
     #[test]

@@ -47,30 +47,64 @@ export function nozzleNeedForFeeders(p: Pick<Printer, "feeders">, feederIds: rea
   return needFrom(feederIds.map((id) => feeding.find((f) => f.id === id)?.nozzle));
 }
 
-/** The area for a nozzle need, or null for the whole bed (see `printAreaForSlots`). */
-export function printAreaForNeed(p: Pick<Printer, "print_areas">, need: NozzleNeed): PrintArea | null {
+/** Id and name of the area synthesized from the left and right areas (fp-core `OVERLAP_AREA_*`). */
+export const OVERLAP_AREA_ID = "overlap";
+export const OVERLAP_AREA_NAME = "Overlap";
+
+/** Where a part may sit (fp-core `PartArea`): the whole bed (printer has no print areas),
+ *  inside an area (saved, or the synthesized overlap), or nowhere its nozzles reach. */
+export type PartArea = { kind: "bed" } | { kind: "area"; area: PrintArea } | { kind: "unreachable" };
+
+/** The area, if the part has one (null for "bed" and "unreachable"). */
+export const partAreaOf = (r: PartArea): PrintArea | null => (r.kind === "area" ? r.area : null);
+
+/** Intersection of every left and every right area (height = the smallest), used as the
+ *  shared area when there is no "both" area. Null without a left and a right area, or
+ *  when they don't overlap. */
+export function overlapArea(p: Pick<Printer, "print_areas">): PrintArea | null {
+  const one = (p.print_areas ?? []).filter((a) => a.nozzle !== "both");
+  if (!one.some((a) => a.nozzle === "left") || !one.some((a) => a.nozzle === "right")) return null;
+  let x0 = -Infinity, y0 = -Infinity, x1 = Infinity, y1 = Infinity, h = Infinity;
+  for (const a of one) {
+    x0 = Math.max(x0, a.x_mm);
+    y0 = Math.max(y0, a.y_mm);
+    x1 = Math.min(x1, a.x_mm + a.width_mm);
+    y1 = Math.min(y1, a.y_mm + a.depth_mm);
+    h = Math.min(h, a.height_mm);
+  }
+  const w = x1 - x0, d = y1 - y0;
+  if (!(w > 1e-9 && d > 1e-9 && h > 0)) return null;
+  return { id: OVERLAP_AREA_ID, name: OVERLAP_AREA_NAME, nozzle: "both", width_mm: w, depth_mm: d, height_mm: h, x_mm: x0, y_mm: y0 };
+}
+
+/** The area both nozzles reach: the first "both" area, else `overlapArea`. */
+export const sharedArea = (p: Pick<Printer, "print_areas">): PrintArea | null =>
+  (p.print_areas ?? []).find((a) => a.nozzle === "both") ?? overlapArea(p);
+
+/** Where a part with this nozzle need must sit (see `printAreaForSlots`). */
+export function printAreaForNeed(p: Pick<Printer, "print_areas">, need: NozzleNeed): PartArea {
   const areas = p.print_areas ?? [];
-  const find = (n: AreaNozzle) => areas.find((a) => a.nozzle === n) ?? null;
-  if (need === "left") return find("left") ?? find("both");
-  if (need === "right") return find("right") ?? find("both");
-  return find("both");
+  if (areas.length === 0) return { kind: "bed" };
+  const own = need === "left" || need === "right" ? (areas.find((a) => a.nozzle === need) ?? null) : null;
+  const area = own ?? sharedArea(p);
+  return area ? { kind: "area", area } : { kind: "unreachable" };
 }
 
 /**
- * The print area a part must sit in, or null for the whole bed. Same rules as fp-core
- * `print_area_for_slots`: pass the printer slot numbers the part prints with.
- * All on left-nozzle feeders -> the first "left" area; all right -> the first "right" area;
- * a mix -> the first "both" area. A missing one-nozzle area falls back to the "both" area.
- * A slot with no nozzle set (or no slots) -> the "both" area. No suitable area (and every
- * printer without print areas) -> null, the whole bed.
- * The area covers x_mm..x_mm+width_mm by y_mm..y_mm+depth_mm from the bed's front-left
+ * Where a part must sit. Same rules as fp-core `print_area_for_slots`: pass the printer
+ * slot numbers the part prints with. All on left-nozzle feeders -> the first "left" area;
+ * all right -> the first "right" area; a mix, a slot with no nozzle set, or no slots -> the
+ * shared area (the first "both" area, else the overlap of the left and right areas). A
+ * missing one-nozzle area also falls back to the shared area. Nothing reachable ->
+ * "unreachable". "bed" (the whole bed) only when the printer has no print areas.
+ * An area covers x_mm..x_mm+width_mm by y_mm..y_mm+depth_mm from the bed's front-left
  * corner; parts must be no taller than height_mm.
  */
-export const printAreaForSlots = (p: Pick<Printer, "feeders" | "print_areas">, slotIndexes: readonly number[]): PrintArea | null =>
+export const printAreaForSlots = (p: Pick<Printer, "feeders" | "print_areas">, slotIndexes: readonly number[]): PartArea =>
   printAreaForNeed(p, nozzleNeedForSlots(p, slotIndexes));
 
 /** `printAreaForSlots` keyed by feeder ids instead of slot numbers. */
-export const printAreaForFeeders = (p: Pick<Printer, "feeders" | "print_areas">, feederIds: readonly string[]): PrintArea | null =>
+export const printAreaForFeeders = (p: Pick<Printer, "feeders" | "print_areas">, feederIds: readonly string[]): PartArea =>
   printAreaForNeed(p, nozzleNeedForFeeders(p, feederIds));
 
 // --- Editing ----------------------------------------------------------------------
