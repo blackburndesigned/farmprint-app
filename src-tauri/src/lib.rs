@@ -750,7 +750,7 @@ fn print_handoff(
             .map_err(|e| e.to_string())?;
         let (name, bed, slots, z) = match request.printer_id.as_deref() {
             Some(pid) => {
-                let (x, y, z) = ledger.printer_build_volume_mm(pid).map_err(|e| e.to_string())?;
+                let (x, y, z) = plate_view::effective_build_volume(&ledger, pid)?;
                 (
                     ledger.printer_name(pid).map_err(|e| e.to_string())?,
                     plate_bed_for(x, y),

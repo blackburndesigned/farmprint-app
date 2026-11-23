@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { Printer, TransitionRequest } from "../../types";
 import { plateFitSummary } from "./plate/plateApi";
-import { printBlockReason, type FitSummary } from "./plate/plateModel";
+import { fitKeyOf, printBlockReason, type FitSummary } from "./plate/plateModel";
 import { FitChip, PlateFitSummary } from "./plate/PlateFitSummary";
 import { CircleDashed, CirclePlay, Printer as PrinterIcon } from "lucide-react";
 import { Icon } from "../../icons";
@@ -43,7 +43,9 @@ export const PrinterPickModal: React.FC<{
   const [fit, setFit] = useState<Record<string, FitSummary> | null>(null);
   const [fitError, setFitError] = useState<string | null>(null);
   const unitKey = pending.req.unit_ids.join(",");
-  const printerKey = printers.map((p) => `${p.id}:${p.bed_x_mm ?? ""}x${p.bed_y_mm ?? ""}x${p.bed_z_mm ?? ""}`).join(",");
+  // Refit when anything layout reads changes on a printer: bed, print areas, feeder
+  // nozzles, loaded slots or extruder clearance.
+  const printerKey = printers.map(fitKeyOf).join(",");
   useEffect(() => {
     if (mark || printers.length === 0) return;
     let stop = false;
@@ -61,8 +63,13 @@ export const PrinterPickModal: React.FC<{
   // Print! is greyed out when the automatic layout can't be sent (too big, or no nozzle
   // area fits a part); the reason is shown next to the button.
   const blockReason = printBlockReason(pickedFit?.check);
-  const bedText = (p: Printer) =>
-    p.bed_x_mm && p.bed_y_mm ? `${Math.round(p.bed_x_mm)} × ${Math.round(p.bed_y_mm)}${p.bed_z_mm ? ` × ${Math.round(p.bed_z_mm)}` : ""} mm` : "";
+  // The size layout uses (from the backend: the bed set in Settings, else what the print
+  // areas span), falling back to the printer's stored fields until the fit arrives.
+  const bedText = (p: Printer) => {
+    const b = fit?.[p.id]?.bed;
+    if (b?.known) return `${Math.round(b.width_mm)} × ${Math.round(b.depth_mm)}${b.height_mm ? ` × ${Math.round(b.height_mm)}` : ""} mm`;
+    return p.bed_x_mm && p.bed_y_mm ? `${Math.round(p.bed_x_mm)} × ${Math.round(p.bed_y_mm)}${p.bed_z_mm ? ` × ${Math.round(p.bed_z_mm)}` : ""} mm` : "";
+  };
   const row = (id: string, body: React.ReactNode) => (
     <label
       key={id || "none"}
