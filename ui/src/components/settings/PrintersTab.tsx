@@ -54,8 +54,14 @@ const sheetInput: React.CSSProperties = {
   outline: "none",
 };
 
-const bedLabel = (p: Printer) =>
-  p.bed_x_mm && p.bed_y_mm ? `${p.bed_x_mm} × ${p.bed_y_mm} mm` : "Bed size not set";
+const bedLabel = (p: Printer) => {
+  const xy = p.bed_x_mm && p.bed_y_mm ? `${p.bed_x_mm} × ${p.bed_y_mm}` : null;
+  const z = p.bed_z_mm ? String(p.bed_z_mm) : null;
+  if (xy && z) return `${xy} × ${z} mm`;
+  if (xy) return `${xy} mm`;
+  if (z) return `Height ${z} mm`;
+  return "Bed size not set";
+};
 
 const PrinterCard: React.FC<{ printer: Printer; accent: string; onOpen: () => void }> = ({ printer: p, accent, onOpen }) => {
   const chip = STATUS_CHIP[p.status] || STATUS_CHIP.Idle;
@@ -90,13 +96,16 @@ const PrinterEditSheet: React.FC<{
   printer: Printer;
   filaments: FilamentSwatch[];
   accent: string;
+  modelSuggestions: string[];
   onAccent: (hex: string) => void;
   run: (cmd: string, args: Record<string, unknown>) => Promise<void>;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ printer: p, filaments, accent, onAccent, run, onRemove, onClose }) => {
+}> = ({ printer: p, filaments, accent, modelSuggestions, onAccent, run, onRemove, onClose }) => {
   const [name, setName] = useState(p.name);
+  const [model, setModel] = useState(p.model);
   useEffect(() => setName(p.name), [p.name]);
+  useEffect(() => setModel(p.model), [p.model]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -116,6 +125,11 @@ const PrinterEditSheet: React.FC<{
     const n = name.trim();
     if (n && n !== p.name) void run("rename_printer", { printer_id: p.id, name: n });
     else setName(p.name);
+  };
+  const commitModel = () => {
+    const m = printerModelToSave(model);
+    if (m !== p.model) void run("set_printer_model", { printer_id: p.id, model: m });
+    else setModel(p.model);
   };
   const chip = STATUS_CHIP[p.status] || STATUS_CHIP.Idle;
 
@@ -155,6 +169,24 @@ const PrinterEditSheet: React.FC<{
                 style={{ ...sheetInput, flex: 1, maxWidth: 280 }}
               />
             </label>
+            <label className="fp-form-row">
+              <span>Model</span>
+              <input
+                type="text"
+                list="fp-settings-edit-printer-model-choices"
+                value={model}
+                placeholder="Model"
+                onChange={(e) => setModel(e.target.value)}
+                onBlur={commitModel}
+                onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+                style={{ ...sheetInput, flex: 1, maxWidth: 280 }}
+              />
+              <datalist id="fp-settings-edit-printer-model-choices">
+                {modelSuggestions.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+            </label>
             <div className="fp-form-row">
               <span>Accent</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -165,6 +197,7 @@ const PrinterEditSheet: React.FC<{
               <BedSizeFields
                 bedX={p.bed_x_mm}
                 bedY={p.bed_y_mm}
+                bedZ={p.bed_z_mm}
                 inputStyle={{ ...sheetInput, width: 72 }}
                 onCommit={(size) => void run("set_printer_bed_size", { printer_id: p.id, ...size })}
               />
@@ -295,7 +328,7 @@ export const PrintersTab: React.FC<{
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newModel, setNewModel] = useState("");
-  const [newBed, setNewBed] = useState<{ x: string; y: string }>({ x: "", y: "" });
+  const [newBed, setNewBed] = useState<{ x: string; y: string; z: string }>({ x: "", y: "", z: "" });
   const nameSuggestions = useMemo(
     () => suggestionValues(printers.map((p) => p.name)).sort((a, b) => a.localeCompare(b)),
     [printers]
@@ -320,13 +353,13 @@ export const PrintersTab: React.FC<{
   const resetAdd = () => {
     setNewName("");
     setNewModel("");
-    setNewBed({ x: "", y: "" });
+    setNewBed({ x: "", y: "", z: "" });
     setAdding(false);
   };
   const addPrinter = () => {
     const name = printerNameToSave(newName, printers.length);
     const model = printerModelToSave(newModel);
-    const bed = parseBedSize(newBed.x, newBed.y);
+    const bed = parseBedSize(newBed.x, newBed.y, newBed.z);
     if ("error" in bed) {
       notifyError(`${name} was not added`, bed.error);
       return;
@@ -386,7 +419,8 @@ export const PrintersTab: React.FC<{
               <BedSizeFields
                 bedX={null}
                 bedY={null}
-                onChangeText={(x, y) => setNewBed({ x, y })}
+                bedZ={null}
+                onChangeText={(x, y, z) => setNewBed({ x, y, z })}
                 inputStyle={{ ...inputStyle, width: 64 }}
               />
               <div style={{ display: "flex", gap: 6, width: "100%" }}>
@@ -421,6 +455,7 @@ export const PrintersTab: React.FC<{
           printer={editing}
           filaments={filaments}
           accent={accentOf(editing.id)}
+          modelSuggestions={modelSuggestions}
           onAccent={(hex) => saveAccent(editing.id, hex)}
           run={run}
           onRemove={async () => {

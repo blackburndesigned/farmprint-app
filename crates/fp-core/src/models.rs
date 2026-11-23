@@ -286,6 +286,10 @@ pub struct Printer {
     /// Bed depth (Y) in mm; None = unknown (use the 220 mm default).
     #[serde(default)]
     pub bed_y_mm: Option<f64>,
+    /// Build height (Z) in mm; None = not set. Stored for later plate-view use;
+    /// plate building and Print! still only use width and depth.
+    #[serde(default)]
+    pub bed_z_mm: Option<f64>,
     /// The units holding this printer's spools, in order. Feeders that feed the printer
     /// group consecutive slot numbers (`loaded_slots` is unchanged); a dry box holds
     /// spools that are not loaded. A printer with no saved feeders shows one default

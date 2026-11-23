@@ -43,7 +43,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   const [newPrinterName, setNewPrinterName] = useState("");
   const [newPrinterModel, setNewPrinterModel] = useState("");
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("0.4");
-  const [newPrinterBed, setNewPrinterBed] = useState<{ x: string; y: string }>({ x: "", y: "" });
+  const [newPrinterBed, setNewPrinterBed] = useState<{ x: string; y: string; z: string }>({ x: "", y: "", z: "" });
   const [showFilamentModal, setShowFilamentModal] = useState(false);
 
   // "By job" (default) shows each batch exactly as it was sent; "By order" splits lanes by order.
@@ -118,7 +118,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
   const handleCreatePrinter = async () => {
     const name = printerNameToSave(newPrinterName, localPrinters.length);
     const model = printerModelToSave(newPrinterModel);
-    const bed = parseBedSize(newPrinterBed.x, newPrinterBed.y);
+    const bed = parseBedSize(newPrinterBed.x, newPrinterBed.y, newPrinterBed.z);
     if ("error" in bed) {
       notifyError(`${name} was not added`, bed.error);
       return;
@@ -132,7 +132,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
     }
     setNewPrinterName("");
     setNewPrinterModel("");
-    setNewPrinterBed({ x: "", y: "" });
+    setNewPrinterBed({ x: "", y: "", z: "" });
     setShowAddPrinterModal(false);
   };
 
@@ -534,7 +534,8 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                 <BedSizeFields
                   bedX={null}
                   bedY={null}
-                  onChangeText={(x, y) => setNewPrinterBed({ x, y })}
+                  bedZ={null}
+                  onChangeText={(x, y, z) => setNewPrinterBed({ x, y, z })}
                   inputStyle={{ padding: "7px 8px", borderRadius: 8, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" }}
                 />
                 <button type="button" className="fp-btn fp-btn-primary" onClick={handleCreatePrinter}>+ Add Printer</button>
@@ -543,7 +544,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                 {localPrinters.map((p) => (
                   <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
                     <div>
-                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{p.name} <span style={{ fontSize: 11.5, color: "rgba(235,235,245,0.55)", fontWeight: 600 }}>({[p.model.trim() || null, `${p.nozzle_mm}mm`, p.bed_x_mm && p.bed_y_mm ? `bed ${p.bed_x_mm}×${p.bed_y_mm}mm` : null].filter(Boolean).join(" · ")})</span></div>
+                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{p.name} <span style={{ fontSize: 11.5, color: "rgba(235,235,245,0.55)", fontWeight: 600 }}>({[p.model.trim() || null, `${p.nozzle_mm}mm`, p.bed_x_mm && p.bed_y_mm ? `bed ${p.bed_x_mm}×${p.bed_y_mm}${p.bed_z_mm ? `×${p.bed_z_mm}` : ""}mm` : p.bed_z_mm ? `height ${p.bed_z_mm}mm` : null].filter(Boolean).join(" · ")})</span></div>
                       <div style={{ fontSize: 11, color: "rgba(235,235,245,0.6)", marginTop: 2 }}>
                         {p.loaded_slots.length > 0 ? p.loaded_slots.map((s) => s.filament_name).join(" · ") : "No filament loaded"}
                       </div>
@@ -551,6 +552,7 @@ export const PrintersView: React.FC<PrintersQueueCommonProps> = ({
                         <BedSizeFields
                           bedX={p.bed_x_mm}
                           bedY={p.bed_y_mm}
+                          bedZ={p.bed_z_mm}
                           inputStyle={{ padding: "3px 6px", borderRadius: 6, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.16)", color: "#fff" }}
                           onCommit={async (size) => {
                             try {

@@ -151,6 +151,8 @@ export interface Printer {
   bed_x_mm?: number | null;
   /** Bed depth (Y) in mm; null/absent = unknown (use the 220 mm default). */
   bed_y_mm?: number | null;
+  /** Build height (Z) in mm; null/absent = not set. Not used by plate building or Print!. */
+  bed_z_mm?: number | null;
   /** Units holding this printer's spools, in order. Absent on older snapshots. */
   feeders?: PrinterFeeder[];
 }

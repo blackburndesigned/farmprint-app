@@ -1526,9 +1526,10 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .get("slot_filament_ids")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
-            // Optional bed size in mm (absent/null = unknown).
+            // Optional bed size in mm (absent/null = not set). Height is independent of width/depth.
             let bed_x_mm = args.get("bed_x_mm").and_then(|v| v.as_f64());
             let bed_y_mm = args.get("bed_y_mm").and_then(|v| v.as_f64());
+            let bed_z_mm = args.get("bed_z_mm").and_then(|v| v.as_f64());
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
             let snap = ledger
                 .add_printer_with_bed(
@@ -1538,12 +1539,14 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                     slot_filament_ids,
                     bed_x_mm,
                     bed_y_mm,
+                    bed_z_mm,
                 )
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
         "set_printer_bed_size" => {
-            // { printer_id, bed_x_mm, bed_y_mm }: numbers in mm, or both null to clear.
+            // { printer_id, bed_x_mm, bed_y_mm, bed_z_mm }: numbers in mm, or null to clear.
+            // Width and depth are both or neither; height is independent and optional.
             let printer_id = args
                 .get("printer_id")
                 .or_else(|| args.get("printerId"))
@@ -1551,9 +1554,10 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .unwrap_or_default();
             let bed_x_mm = args.get("bed_x_mm").and_then(|v| v.as_f64());
             let bed_y_mm = args.get("bed_y_mm").and_then(|v| v.as_f64());
+            let bed_z_mm = args.get("bed_z_mm").and_then(|v| v.as_f64());
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
             let snap = ledger
-                .set_printer_bed_size(printer_id, bed_x_mm, bed_y_mm)
+                .set_printer_bed_size(printer_id, bed_x_mm, bed_y_mm, bed_z_mm)
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
@@ -1917,6 +1921,25 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
             }
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
             let snap = ledger.rename_printer(id, name).map_err(|e| e.to_string())?;
+            serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
+        "set_printer_model" => {
+            let id = args
+                .get("printer_id")
+                .or_else(|| args.get("printerId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let model = args
+                .get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if id.is_empty() {
+                return Err("printer_id is required".into());
+            }
+            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            let snap = ledger
+                .set_printer_model(id, model)
+                .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
         "settings_choose_path" => {
