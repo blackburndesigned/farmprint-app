@@ -502,6 +502,16 @@ export function layoutFor(parts: PlatePart[], order: string[][]): PrintLayout {
   };
 }
 
+/** Why Print! can't send this automatic layout, or null when it can: a part off the bed
+ *  or too tall for the printer, or a part no nozzle area fits. */
+export function printBlockReason(c: Pick<PlateCheck, "off_plate" | "too_tall" | "unreachable"> | null | undefined): string | null {
+  if (!c) return null;
+  const none = c.unreachable?.length ?? 0;
+  if (none) return `${none === 1 ? UNREACHABLE_MESSAGE : `No nozzle area fits ${none} parts`}. Load the filament on another feeder, pick another printer, or open Arrange plate…`;
+  if (c.off_plate.length || c.too_tall.length) return "A part doesn't fit this printer. Pick another printer or open Arrange plate…";
+  return null;
+}
+
 /** Status line headline for a check. */
 export function fitHeadline(c: Pick<PlateCheck, "fits" | "plates" | "off_plate" | "collisions" | "too_tall" | "out_of_area" | "unreachable">, bigger?: number): {
   tone: "ok" | "warn" | "bad";

@@ -2,6 +2,7 @@ import {
   angleDelta,
   biggerThanBed,
   clearanceFieldsOf,
+  printBlockReason,
   reachFromPartArea,
   DEFAULT_SETTINGS,
   plateEntryOf,
@@ -155,6 +156,16 @@ check(!h.canRedo, "a new change clears redo");
   const d = clearanceFieldsOf(normalizeSettings({}));
   check(d.extruder_clearance_dist_to_rod === null && d.extruder_clearance_height_to_lid === null, "unset distance to rod and height to lid stay empty");
   check(DEFAULT_SETTINGS.clearance_radius_mm === PLATE_DEFAULT_CLEARANCE_RADIUS_MM && DEFAULT_SETTINGS.clearance_height_mm === PLATE_DEFAULT_CLEARANCE_HEIGHT_MM, "plate defaults match the printer clearance fallbacks");
+}
+
+// Print! in the printer picker is greyed out for parts too big or no nozzle area fits.
+{
+  const ok = { off_plate: [], too_tall: [], unreachable: [] };
+  check(printBlockReason(ok) === null && printBlockReason(undefined) === null, "Print! enabled when the layout fits (or no summary yet)");
+  check(printBlockReason({ ...ok, unreachable: ["u"] })?.startsWith("No nozzle area fits this part") === true, "Print! blocked for an unreachable part, with the reason");
+  check(printBlockReason({ ...ok, unreachable: ["u", "v"] })?.startsWith("No nozzle area fits 2 parts") === true, "reason counts unreachable parts");
+  check(printBlockReason({ off_plate: ["a"], too_tall: [] })?.includes("doesn't fit this printer") === true, "too big still blocks Print!");
+  check(printBlockReason({ off_plate: [], too_tall: ["a"], unreachable: ["u"] })?.startsWith("No nozzle area") === true, "unreachable reason wins");
 }
 
 done();
