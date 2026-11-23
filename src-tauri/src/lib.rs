@@ -10,6 +10,7 @@ mod feedback;
 mod feedback_url;
 mod logo;
 mod orderthumbs;
+mod plate_view;
 mod sample_shop;
 mod slicer;
 
@@ -110,7 +111,11 @@ pub struct AppState {
 #[derive(Debug, Clone, Serialize)]
 pub struct SlicerHandoffResult {
     pub snapshot: ShopSnapshot,
+    /// The first plate's file (kept for older callers); see `plate_paths`.
     pub plate_path: String,
+    /// One .3mf per plate, in plate order.
+    pub plate_paths: Vec<String>,
+    pub plate_count: usize,
     pub part_count: usize,
     /// True when the plate was opened (in the chosen slicer or the default .3mf app).
     pub slicer_launched: bool,
@@ -433,7 +438,7 @@ fn resolve_unit_stl(
 /// Each unit's real model, read once per file (twenty units of one part = one parse), in
 /// unit order. Err lists the names ("Product · Part") of units whose model can't be found
 /// or read; nothing is ever replaced with a stand-in shape.
-fn load_unit_meshes(
+pub(crate) fn load_unit_meshes(
     tracker_root: &Path,
     units: &[(fp_core::PartUnit, String)],
 ) -> Result<Vec<fp_mesh::TriangleMesh>, Vec<String>> {
@@ -461,6 +466,16 @@ fn load_unit_meshes(
         Ok(meshes)
     } else {
         Err(missing)
+    }
+}
+
+/// The optional plate view layout sent with Print! (`layout`).
+fn layout_arg(args: &Value) -> Result<Option<plate_view::PrintLayout>, String> {
+    match args.get("layout") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => serde_json::from_value(v.clone())
+            .map(Some)
+            .map_err(|e| format!("bad plate layout: {e}")),
     }
 }
 
@@ -514,6 +529,7 @@ fn plate_options_for(
                 material: u.filament_material.clone(),
             })
             .collect(),
+        transforms: Vec::new(),
     }
 }
 
@@ -566,16 +582,27 @@ fn plate_items_for(
         .collect()
 }
 
-/// Builds the 3MF plate, writes it to the handoff folder and opens it in the slicer
-/// chosen in Settings (see `slicer`). Returns `(plate path, part count, how it opened)`,
-/// or a plain-language reason when no plate file could be written. Takes no ledger lock.
+/// The plate layout for Print!: the bed (with its height when set) and the printer's
+/// remembered arrange settings.
+struct PlateLayoutPlan {
+    bed: fp_mesh::plate::BedSize,
+    settings: fp_mesh::plate::ArrangeSettings,
+}
+
+/// Builds one 3MF per plate, writes them to the handoff folder and opens each in the slicer
+/// chosen in Settings (see `slicer`). Parts are placed as the plate view left them
+/// (`layout`), or arranged automatically, so Print! stays one click. Returns
+/// `(plate paths, part count, how the first plate opened)`, or a plain-language reason
+/// when no plate file could be written. Takes no ledger lock.
 fn stage_and_open_plate(
     units_with_meshes: &[(fp_core::PartUnit, String)],
     meshes: &[fp_mesh::TriangleMesh],
     printer_name: Option<&str>,
-    bed: fp_mesh::PlateOptions,
+    mut options: fp_mesh::PlateOptions,
+    plan: &PlateLayoutPlan,
+    layout: Option<&plate_view::PrintLayout>,
     slicer_choice: &slicer::SlicerChoice,
-) -> Result<(String, usize, Option<slicer::Opened>), String> {
+) -> Result<(Vec<String>, usize, Option<slicer::Opened>), String> {
     if units_with_meshes.is_empty() {
         return Err("none of the selected parts were found".to_string());
     }
@@ -584,13 +611,43 @@ fn stage_and_open_plate(
     if meshes.len() != units_with_meshes.len() {
         return Err("some parts have no saved model".to_string());
     }
-    let plate_items = plate_items_for(units_with_meshes, meshes);
-    let bytes = build_plate_bytes(&plate_items, bed).map_err(|e| {
-        format!(
-            "could not build the plate file: {}",
-            e.trim_end_matches('.')
-        )
-    })?;
+    if layout.is_none() {
+        // One click: refuse only what no layout can fix (a part bigger than the bed or
+        // taller than the printer); everything else spills onto more plates.
+        let refs: Vec<&fp_mesh::TriangleMesh> = meshes.iter().collect();
+        let (_, c) = fp_mesh::plate::auto_layout(&refs, &[], &plan.bed, &plan.settings);
+        let names = |ix: &[usize]| {
+            let mut v: Vec<String> = Vec::new();
+            for &i in ix {
+                let u = &units_with_meshes[i].0;
+                let n = format!("{} · {}", u.product_name, u.part_name);
+                if !v.contains(&n) {
+                    v.push(n);
+                }
+            }
+            v.join(", ")
+        };
+        if !c.off_plate.is_empty() {
+            return Err(format!(
+                "{} {} bigger than the printer's bed ({:.0} × {:.0} mm)",
+                names(&c.off_plate),
+                if c.off_plate.len() == 1 { "is" } else { "are" },
+                plan.bed.width_mm,
+                plan.bed.depth_mm
+            ));
+        }
+        if !c.too_tall.is_empty() {
+            return Err(format!(
+                "{} {} taller than the printer can print ({:.0} mm)",
+                names(&c.too_tall),
+                if c.too_tall.len() == 1 { "is" } else { "are" },
+                plan.bed.height_mm.unwrap_or_default()
+            ));
+        }
+    }
+    let plates = plate_view::plan_plates(units_with_meshes, meshes, layout, &plan.bed, &plan.settings)?;
+    let all_items = plate_items_for(units_with_meshes, meshes);
+    let all_filaments = std::mem::take(&mut options.item_filaments);
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
@@ -607,18 +664,50 @@ fn stage_and_open_plate(
         .0
         .filament_name
         .replace([' ', '/', ':'], "_");
-    let filename = format!(
-        "FarmPrint_{}_{}_{}parts.3mf",
-        clean_printer,
-        first_fil,
-        plate_items.len()
-    );
-    let out_path = handoff_dir.join(filename);
-    std::fs::write(&out_path, bytes)
-        .map_err(|e| format!("could not save {}: {e}", out_path.display()))?;
-    let path_str = out_path.to_string_lossy().to_string();
-    let opened = slicer::open_plate(slicer_choice, &path_str);
-    Ok((path_str, plate_items.len(), opened))
+    let total = plates.len();
+    let mut paths = Vec::with_capacity(total);
+    let mut count = 0;
+    for (pi, group) in plates.iter().enumerate() {
+        let items: Vec<PlateBuildItem> = group.iter().map(|(i, _)| all_items[*i].clone()).collect();
+        let mut opts = options.clone();
+        opts.item_filaments = group
+            .iter()
+            .filter_map(|(i, _)| all_filaments.get(*i).cloned())
+            .collect();
+        opts.transforms = group.iter().map(|(_, t)| *t).collect();
+        let bytes = build_plate_bytes(&items, opts).map_err(|e| {
+            format!(
+                "could not build the plate file: {}",
+                e.trim_end_matches('.')
+            )
+        })?;
+        let filename = if total == 1 {
+            format!("FarmPrint_{}_{}_{}parts.3mf", clean_printer, first_fil, items.len())
+        } else {
+            format!(
+                "FarmPrint_{}_{}_plate{}of{}_{}parts.3mf",
+                clean_printer,
+                first_fil,
+                pi + 1,
+                total,
+                items.len()
+            )
+        };
+        let out_path = handoff_dir.join(filename);
+        std::fs::write(&out_path, bytes)
+            .map_err(|e| format!("could not save {}: {e}", out_path.display()))?;
+        count += items.len();
+        paths.push(out_path.to_string_lossy().to_string());
+    }
+    // Every plate goes to the slicer together; how the first opened is what's reported.
+    let mut first_opened = None;
+    for (i, p) in paths.iter().enumerate() {
+        let o = slicer::open_plate(slicer_choice, p);
+        if i == 0 {
+            first_opened = o;
+        }
+    }
+    Ok((paths, count, first_opened))
 }
 
 /// Print! handoff without holding the ledger lock while the plate is built and the
@@ -628,8 +717,9 @@ fn print_handoff(
     state: &AppState,
     request: TransitionRequest,
     allow_without_slicer: bool,
+    layout: Option<plate_view::PrintLayout>,
 ) -> Result<SlicerHandoffResult, String> {
-    let (units_for_plate, prn_name, bed, choice) = {
+    let (units_for_plate, prn_name, bed, choice, plan) = {
         let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
         let settings = ledger.get_settings().map_err(|e| e.to_string())?;
         let choice = slicer::slicer_choice(
@@ -640,22 +730,38 @@ fn print_handoff(
         let units = ledger
             .units_by_ids(&request.unit_ids)
             .map_err(|e| e.to_string())?;
-        let (name, bed, slots) = match request.printer_id.as_deref() {
+        let (name, bed, slots, z) = match request.printer_id.as_deref() {
             Some(pid) => {
-                let (x, y) = ledger.printer_bed_mm(pid).map_err(|e| e.to_string())?;
+                let (x, y, z) = ledger.printer_build_volume_mm(pid).map_err(|e| e.to_string())?;
                 (
                     ledger.printer_name(pid).map_err(|e| e.to_string())?,
                     plate_bed_for(x, y),
                     ledger
                         .printer_loaded_slots(pid)
                         .map_err(|e| e.to_string())?,
+                    z.filter(|v| v.is_finite() && *v > 0.0),
                 )
             }
-            None => (None, None, Vec::new()),
+            None => (None, None, Vec::new(), None),
+        };
+        let arrange = request
+            .printer_id
+            .as_deref()
+            .and_then(|pid| settings.printer_plate.get(pid).cloned())
+            .and_then(|v| serde_json::from_value::<fp_mesh::plate::ArrangeSettings>(v).ok())
+            .unwrap_or_default();
+        let b = bed.unwrap_or_default();
+        let plan = PlateLayoutPlan {
+            bed: fp_mesh::plate::BedSize {
+                width_mm: b.width_mm as f64,
+                depth_mm: b.depth_mm as f64,
+                height_mm: z,
+            },
+            settings: arrange,
         };
         // The bed size plus the printer's loaded slots, so slot N is filament N in the slicer.
         let bed = plate_options_for(&units, bed, &slots);
-        (units, name, bed, choice)
+        (units, name, bed, choice, plan)
     }; // ledger lock released here
        // Every model is read once, here, outside the ledger lock.
     let meshes = load_unit_meshes(&state.tracker_root, &units_for_plate).map_err(|missing| {
@@ -664,17 +770,30 @@ fn print_handoff(
             missing.join(", ")
         )
     })?;
-    let (plate_path, part_count, opened) = if units_for_plate.is_empty() {
-        (String::new(), 0, None)
+    let (plate_paths, part_count, opened) = if units_for_plate.is_empty() {
+        (Vec::new(), 0, None)
     } else {
-        stage_and_open_plate(&units_for_plate, &meshes, prn_name.as_deref(), bed, &choice).map_err(
-            |e| format!("Nothing was sent to the slicer, and nothing was moved to Printing: {e}."),
-        )?
+        stage_and_open_plate(
+            &units_for_plate,
+            &meshes,
+            prn_name.as_deref(),
+            bed,
+            &plan,
+            layout.as_ref(),
+            &choice,
+        )
+        .map_err(|e| format!("Nothing was sent to the slicer, and nothing was moved to Printing: {e}."))?
     };
+    let plate_path = plate_paths.first().cloned().unwrap_or_default();
     if !units_for_plate.is_empty() && opened.is_none() && !allow_without_slicer {
+        let saved = if plate_paths.len() > 1 {
+            format!("The {} plates were saved to {}", plate_paths.len(), plate_paths.join(", "))
+        } else {
+            format!("The plate was saved to {plate_path}")
+        };
         // The UI matches the start of this message to offer "Mark Printing anyway".
         return Err(format!(
-            "Nothing was moved to Printing: the slicer could not be opened. {} didn't start, and no app on this computer opened the .3mf file. The plate was saved to {plate_path}. Open it in your slicer, then mark the parts Printing.",
+            "Nothing was moved to Printing: the slicer could not be opened. {} didn't start, and no app on this computer opened the .3mf file. {saved}. Open it in your slicer, then mark the parts Printing.",
             choice.label
         ));
     }
@@ -685,6 +804,8 @@ fn print_handoff(
     Ok(SlicerHandoffResult {
         snapshot,
         plate_path,
+        plate_count: plate_paths.len(),
+        plate_paths,
         part_count,
         slicer_launched: opened.is_some(),
         slicer_name: choice.label,
@@ -1021,13 +1142,13 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .or_else(|| args.get("skipSlicer"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let req_val = args.get("request").cloned().unwrap_or(args);
+            let req_val = args.get("request").cloned().unwrap_or_else(|| args.clone());
             let request: TransitionRequest =
                 serde_json::from_value(req_val).map_err(|e| e.to_string())?;
             let should_handoff =
                 request.to_state == "Printing" && request.failure_reason.is_none() && !skip_slicer;
             if should_handoff {
-                let result = print_handoff(state, request, allow_without_slicer)?;
+                let result = print_handoff(state, request, allow_without_slicer, layout_arg(&args)?)?;
                 return serde_json::to_value(result.snapshot).map_err(|e| e.to_string());
             }
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
@@ -1079,9 +1200,17 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                     filament_id: None,
                 },
                 allow_without_slicer,
+                layout_arg(&args)?,
             )?;
             serde_json::to_value(result).map_err(|e| e.to_string())
         }
+        "plate_prepare" => plate_view::prepare(state, &args),
+        "plate_fit_summary" => plate_view::fit_summary(state, &args),
+        "plate_arrange" => plate_view::arrange(state, &args),
+        "plate_check" => plate_view::check(state, &args),
+        "plate_auto_orient" => plate_view::auto_orient(state, &args),
+        "plate_footprint" => plate_view::footprint(state, &args),
+        "plate_face_candidates" => plate_view::face_candidates(state, &args),
         "undo_flow_event" => {
             let event_id = args
                 .get("event_id")
@@ -2097,6 +2226,10 @@ fn shop_token_refresher(
         .map(|s| s.access_token)
         .map_err(String::from)
     })
+}
+
+pub(crate) fn shop_settings_for_plate(state: &AppState) -> Result<fp_core::models::ShopSettings, String> {
+    shop_settings(state)
 }
 
 fn shop_settings(state: &AppState) -> Result<fp_core::models::ShopSettings, String> {
