@@ -603,8 +603,12 @@ fn best_spot(
     for &r in rots {
         let h0 = transform_2d(hull, r, 0.0, 0.0);
         let b = bbox_2d(&h0);
-        let (x0, x1) = (-b[0], bed.width_mm - b[2]);
-        let (y0, y1) = (-b[1], bed.depth_mm - b[3]);
+        // The simplified outline can sit up to SIMPLIFY_MM inside the real one: keep that
+        // much from the bed edges too (less only when the part barely fits).
+        let mx = edge_margin(bed.width_mm - (b[2] - b[0]));
+        let my = edge_margin(bed.depth_mm - (b[3] - b[1]));
+        let (x0, x1) = (-b[0] + mx, bed.width_mm - b[2] - mx);
+        let (y0, y1) = (-b[1] + my, bed.depth_mm - b[3] - my);
         if x1 < x0 - 1e-9 || y1 < y0 - 1e-9 {
             continue;
         }
@@ -652,7 +656,8 @@ fn best_spot(
     let h0 = transform_2d(hull, p.rot_deg, 0.0, 0.0);
     let b = bbox_2d(&h0);
     let nfps = nfps_for(&h0, placed);
-    let ok = |x: f64, y: f64| x + b[0] >= -1e-9 && y + b[1] >= -1e-9 && free_at(&nfps, x, y);
+    let (mx, my) = (edge_margin(bed.width_mm - (b[2] - b[0])), edge_margin(bed.depth_mm - (b[3] - b[1])));
+    let ok = |x: f64, y: f64| x + b[0] >= mx - 1e-9 && y + b[1] >= my - 1e-9 && free_at(&nfps, x, y);
     let mut fine = step / 2.0;
     while fine >= 0.125 {
         loop {
@@ -675,6 +680,11 @@ fn best_spot(
 }
 
 const SIMPLIFY_MM: f64 = 0.25;
+
+/// Distance kept from the bed edges for a part with `slack` mm of room along one axis.
+fn edge_margin(slack: f64) -> f64 {
+    SIMPLIFY_MM.min((slack / 2.0).max(0.0))
+}
 
 /// Arranges every unpinned item, filling plate 1 first and adding plates as needed. Pinned
 /// items stay where they are and act as obstacles. An item larger than the bed stays on
@@ -991,12 +1001,37 @@ pub fn center_of_mass(tris: &[[V3; 3]]) -> V3 {
 
 /// 3D convex hull (incremental, with horizon edges). Returns outward triangles as indices
 /// into `pts`. Empty when the points are flat or too few.
-pub fn convex_hull_3d(pts: &[V3]) -> Vec<[usize; 3]> {
+pub fn convex_hull_3d(pts_in: &[V3]) -> Vec<[usize; 3]> {
     use std::collections::HashMap;
-    let n = pts.len();
+    // Models repeat each corner once per triangle: hull the distinct points only (snapped to
+    // 1/10000 mm), centred on their middle so the arithmetic stays precise.
+    let mut uniq: Vec<V3> = Vec::new();
+    let mut back: Vec<usize> = Vec::new();
+    {
+        let mut seen: HashMap<(i64, i64, i64), ()> = HashMap::new();
+        for (i, p) in pts_in.iter().enumerate() {
+            if !p.iter().all(|v| v.is_finite()) {
+                continue;
+            }
+            let key = ((p[0] * 1e4).round() as i64, (p[1] * 1e4).round() as i64, (p[2] * 1e4).round() as i64);
+            if seen.insert(key, ()).is_none() {
+                uniq.push(*p);
+                back.push(i);
+            }
+        }
+    }
+    let n = uniq.len();
     if n < 4 {
         return Vec::new();
     }
+    let mut c = [0.0; 3];
+    for p in &uniq {
+        for k in 0..3 {
+            c[k] += p[k] / n as f64;
+        }
+    }
+    let pts: Vec<V3> = uniq.iter().map(|p| sub3(*p, c)).collect();
+    let pts = &pts[..];
     let mut lo = [f64::INFINITY; 3];
     let mut hi = [f64::NEG_INFINITY; 3];
     for p in pts {
@@ -1006,7 +1041,9 @@ pub fn convex_hull_3d(pts: &[V3]) -> Vec<[usize; 3]> {
         }
     }
     let scale = len3(sub3(hi, lo)).max(1e-9);
-    let eps = scale * 1e-9;
+    // Points this close to a face's plane count as on it (cylinders and other finely
+    // divided curves are full of nearly coplanar points).
+    let eps = scale * 1e-5;
     // Initial tetrahedron.
     let i0 = (0..n).min_by(|&a, &b| pts[a][0].total_cmp(&pts[b][0])).unwrap();
     let i1 = (0..n).max_by(|&a, &b| len3(sub3(pts[a], pts[i0])).total_cmp(&len3(sub3(pts[b], pts[i0])))).unwrap();
@@ -1079,7 +1116,7 @@ pub fn convex_hull_3d(pts: &[V3]) -> Vec<[usize; 3]> {
         let visible: Vec<usize> = alive
             .iter()
             .copied()
-            .filter(|&f| dot3(faces[f].n, p) - faces[f].d > eps * 10.0)
+            .filter(|&f| dot3(faces[f].n, p) - faces[f].d > eps)
             .collect();
         if visible.is_empty() {
             continue;
@@ -1119,8 +1156,13 @@ pub fn convex_hull_3d(pts: &[V3]) -> Vec<[usize; 3]> {
             stamp.push(usize::MAX);
             alive.push(id);
         }
+        // A valid hull of k points has at most 2k - 4 faces; far more means the arithmetic
+        // went wrong. Stop rather than grow without bound.
+        if alive.len() > 2 * n + 64 {
+            return Vec::new();
+        }
     }
-    faces.into_iter().filter(|f| f.alive).map(|f| f.v).collect()
+    faces.into_iter().filter(|f| f.alive).map(|f| f.v.map(|i| back[i])).collect()
 }
 
 struct Group {
@@ -1229,8 +1271,10 @@ pub fn face_candidates(mesh: &TriangleMesh, mode: FaceMode, min_area_mm2: f64, m
     groups.iter().map(|g| evaluate(g, &tris, com)).collect()
 }
 
-/// Picks the best resting face: the largest contact area among stable faces (within 10% of
-/// the best counts as a tie), then the lowest height (within 1 mm), then the least overhang.
+/// Picks the best resting face: the largest contact area among stable faces, less the area
+/// that would hang over air (a tube on its side touches more of the bed than on its rim, but
+/// its inside would need support), within 10% of the best counts as a tie; then the lowest
+/// height (within 1 mm), then the least overhang.
 pub fn auto_orient(mesh: &TriangleMesh) -> Option<FaceCandidate> {
     let mut c = face_candidates(mesh, FaceMode::ConvexHull, 0.0, 400);
     if c.is_empty() {
@@ -1239,9 +1283,13 @@ pub fn auto_orient(mesh: &TriangleMesh) -> Option<FaceCandidate> {
     if c.iter().any(|f| f.stable) {
         c.retain(|f| f.stable);
     }
-    let key = |f: &FaceCandidate| if f.contact_area > 1e-6 { f.contact_area } else { f.area * 1e-3 };
-    let best_area = c.iter().map(key).fold(0.0, f64::max);
-    c.retain(|f| key(f) >= best_area * 0.9 - 1e-9);
+    let key = |f: &FaceCandidate| {
+        let touch = if f.contact_area > 1e-6 { f.contact_area } else { f.area * 1e-3 };
+        touch - f.overhang_area
+    };
+    let best = c.iter().map(key).fold(f64::NEG_INFINITY, f64::max);
+    let slack = best.abs() * 0.1;
+    c.retain(|f| key(f) >= best - slack - 1e-9);
     let min_h = c.iter().map(|f| f.height).fold(f64::INFINITY, f64::min);
     c.retain(|f| f.height <= min_h + 1.0);
     c.sort_by(|a, b| a.overhang_area.total_cmp(&b.overhang_area).then(key(b).total_cmp(&key(a))));
@@ -1304,6 +1352,97 @@ pub fn plate_groups(parts: &[PlannedPart], c: &PlateCheck) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An open tube (a pen-cup sleeve): `seg` sides, radius `r`, wall `t`, height `h`.
+    fn tube(seg: usize, r: f32, t: f32, h: f32) -> TriangleMesh {
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+        let ring = |rad: f32, z: f32, positions: &mut Vec<[f32; 3]>| {
+            let base = positions.len() as u32;
+            for k in 0..seg {
+                let a = k as f32 / seg as f32 * std::f32::consts::TAU;
+                positions.push([rad * a.cos(), rad * a.sin(), z]);
+            }
+            base
+        };
+        let ob = ring(r, 0.0, &mut positions);
+        let ot = ring(r, h, &mut positions);
+        let ib = ring(r - t, 0.0, &mut positions);
+        let it = ring(r - t, h, &mut positions);
+        let s = seg as u32;
+        for k in 0..s {
+            let n = (k + 1) % s;
+            indices.push([ob + k, ob + n, ot + n]);
+            indices.push([ob + k, ot + n, ot + k]);
+            indices.push([ib + k, it + n, ib + n]);
+            indices.push([ib + k, it + k, it + n]);
+            indices.push([ob + k, ib + n, ob + n]);
+            indices.push([ob + k, ib + k, ib + n]);
+            indices.push([ot + k, ot + n, it + n]);
+            indices.push([ot + k, it + n, it + k]);
+        }
+        TriangleMesh { name: "tube".into(), positions, indices }
+    }
+
+    #[test]
+    fn hull_of_a_finely_divided_cylinder_is_closed_and_small() {
+        // Every corner listed once per triangle, like a model file, and 160 sides.
+        let m = tube(160, 40.0, 2.0, 90.0);
+        let pts: Vec<V3> = m
+            .indices
+            .iter()
+            .flat_map(|t| t.iter().map(|&i| m.positions[i as usize]))
+            .map(|v| [v[0] as f64, v[1] as f64, v[2] as f64])
+            .collect();
+        let hull = convex_hull_3d(&pts);
+        assert!(!hull.is_empty());
+        // Closed: every edge is shared with exactly one face going the other way.
+        let mut edges = std::collections::HashMap::new();
+        for f in &hull {
+            for k in 0..3 {
+                let a = pts[f[k]].map(|v| (v * 1e4).round() as i64);
+                let b = pts[f[(k + 1) % 3]].map(|v| (v * 1e4).round() as i64);
+                *edges.entry((a, b)).or_insert(0) += 1;
+            }
+        }
+        for (&(a, b), &n) in &edges {
+            assert_eq!(n, 1, "edge used twice");
+            assert_eq!(edges.get(&(b, a)), Some(&1), "open edge");
+        }
+        // A closed triangulated hull of k corners has 2k - 4 faces; 640 distinct points here
+        // (corners on the flat ends may be used too).
+        assert!(hull.len() >= 2 * 320 - 4 && hull.len() <= 2 * 640 - 4, "{} faces", hull.len());
+    }
+
+    #[test]
+    fn open_tube_stays_upright() {
+        let m = tube(10, 35.0, 2.0, 100.0);
+        let c = auto_orient(&m).unwrap();
+        let down = quat_rotate(c.orientation, [0.0, 0.0, -1.0]);
+        // Standing on either rim (the tube is the same both ways up), never on its side.
+        assert!(down[2].abs() > 0.999, "tilted: {:?}", c.orientation);
+    }
+
+    #[test]
+    fn round_parts_stay_on_the_bed_despite_outline_simplification() {
+        // A finely divided disc (like a coaster) loses corners when simplified; the real
+        // outline must still be on the bed after arranging.
+        let disc: Vec<V2> = (0..96)
+            .map(|k| {
+                let a = k as f64 / 96.0 * std::f64::consts::TAU;
+                [53.2 * a.cos(), 53.2 * a.sin()]
+            })
+            .collect();
+        let items: Vec<ArrangeItem> = (0..6)
+            .map(|_| ArrangeItem { hull: disc.clone(), height: 5.0, rot_deg: 0.0, pinned: None })
+            .collect();
+        let bed = BedSize { width_mm: 256.0, depth_mm: 256.0, height_mm: None };
+        let s = ArrangeSettings::default();
+        let p = arrange(&items, &bed, &s);
+        let c = check(&items, &p, &bed, &s);
+        assert!(c.off_plate.is_empty(), "{c:?}");
+        assert!(c.collisions.is_empty());
+    }
 
     fn rect(w: f64, d: f64) -> Vec<V2> {
         vec![[-w / 2.0, -d / 2.0], [w / 2.0, -d / 2.0], [w / 2.0, d / 2.0], [-w / 2.0, d / 2.0]]
