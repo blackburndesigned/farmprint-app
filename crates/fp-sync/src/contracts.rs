@@ -823,12 +823,11 @@ pub struct FilamentSpoolIdentity {
 }
 
 fn normalize_brand(brand: &str) -> String {
-    let compact: String = brand
+    brand
         .chars()
         .filter(|c| !c.is_whitespace())
-        .collect::<String>()
-        .to_lowercase();
-    compact.replace("labs", "lab")
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
 fn normalize_token(s: &str) -> String {
@@ -838,7 +837,7 @@ fn normalize_token(s: &str) -> String {
         .to_lowercase()
 }
 
-/// Two spools are the same filament when brand (ignoring case/spacing/"Lab" vs "Labs"),
+/// Two spools are the same filament when brand (ignoring case and whitespace only),
 /// material line (bare base material matches any line of that material), and color name match.
 /// Hex is never used to decide a match (hex values vary between brands and scans).
 pub fn spools_match(a: &FilamentSpoolIdentity, b: &FilamentSpoolIdentity) -> bool {
@@ -977,20 +976,34 @@ mod tests {
     }
 
     #[test]
-    fn filament_identity_ignores_hex_and_handles_bambu_lab_vs_labs_and_bare_material() {
+    fn filament_identity_ignores_hex_case_and_whitespace_and_bare_material() {
         let s1 = FilamentSpoolIdentity {
-            brand: Some("Bambu Lab".to_string()),
+            brand: Some("Poly Maker".to_string()),
             material_line: "PETG HF".to_string(),
             color_name: "Blue".to_string(),
             hex: "#1E40AF".to_string(),
         };
         let s2 = FilamentSpoolIdentity {
-            brand: Some("bambulabs".to_string()),
+            brand: Some("polymaker".to_string()),
             material_line: "PETG".to_string(),
             color_name: "blue".to_string(),
             hex: "#0000FF".to_string(),
         };
         assert!(spools_match(&s1, &s2));
+        // Brand matching does not apply singular/plural or other brand-specific rewrites.
+        let s3 = FilamentSpoolIdentity {
+            brand: Some("Acme Lab".to_string()),
+            material_line: "PLA".to_string(),
+            color_name: "Red".to_string(),
+            hex: "#FF0000".to_string(),
+        };
+        let s4 = FilamentSpoolIdentity {
+            brand: Some("acmelabs".to_string()),
+            material_line: "PLA".to_string(),
+            color_name: "red".to_string(),
+            hex: "#AA0000".to_string(),
+        };
+        assert!(!spools_match(&s3, &s4));
     }
 
     #[test]
