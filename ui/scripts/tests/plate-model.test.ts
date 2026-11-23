@@ -4,6 +4,7 @@ import {
   convexOverlap,
   effectiveOrder,
   fitHeadline,
+  History,
   layoutFor,
   liveProblems,
   normalizeSettings,
@@ -61,4 +62,14 @@ check(grown.every(([x, y]) => Math.max(Math.abs(x), Math.abs(y)) <= 10.0001) && 
 check(biggerThanBed([part("big", 50, 50, 150)], bed).join() === "big", "a part wider than the bed is flagged");
 const lay = layoutFor(parts, [["a", "b"], ["c"]]);
 check(lay.parts.length === 3 && lay.parts[2].placement.plate === 1, "layout carries every part's plate and spot");
+const h = new History();
+const s0 = { parts: [part("a", 10, 10)], plateCount: 1, order: null };
+const s1 = { parts: [part("a", 50, 10)], plateCount: 1, order: null };
+h.push(s0);
+const back = h.undo(s1);
+check(back === s0 && h.canRedo, "undo returns the earlier layout");
+check(h.redo(s0) === s1 && !h.canRedo, "redo returns the later layout");
+h.undo(s1);
+h.push(s0);
+check(!h.canRedo, "a new change clears redo");
 done();

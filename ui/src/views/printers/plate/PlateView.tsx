@@ -18,6 +18,7 @@ import {
   RotateCw,
   Scan,
   Undo2,
+  Redo2,
   WandSparkles,
   TriangleAlert,
   X,
@@ -103,7 +104,6 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [faceHint, setFaceHint] = useState<string | null>(null);
   const history = useRef(new History());
-  const [undoCount, setUndoCount] = useState(0);
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<PlateScene | null>(null);
   const stateRef = useRef(state);
@@ -137,19 +137,23 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
   }, []);
 
   // ---- history ------------------------------------------------------------------------------
+  const [, setHistoryTick] = useState(0);
+  const bumpHistory = () => setHistoryTick((n) => n + 1);
   const commit = useCallback((next: PlateState | ((s: PlateState) => PlateState)) => {
     history.current.push(stateRef.current);
-    setUndoCount(history.current.size);
+    bumpHistory();
     setState(next);
   }, []);
-  const undo = useCallback(() => {
-    const prev = history.current.pop();
-    setUndoCount(history.current.size);
-    if (prev) {
-      setState(prev);
-      setSelected((s) => new Set([...s].filter((id) => prev.parts.some((p) => p.unit_id === id))));
+  const travel = useCallback((dir: "undo" | "redo") => {
+    const to = dir === "undo" ? history.current.undo(stateRef.current) : history.current.redo(stateRef.current);
+    bumpHistory();
+    if (to) {
+      setState(to);
+      setSelected((s) => new Set([...s].filter((id) => to.parts.some((p) => p.unit_id === id))));
     }
   }, []);
+  const undo = useCallback(() => travel("undo"), [travel]);
+  const redo = useCallback(() => travel("redo"), [travel]);
 
   // ---- backend check after every change (debounced, stale replies dropped) ------------------
   const checkSeq = useRef(0);
@@ -201,7 +205,10 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
   }, [byObject, order]);
   const partById = useMemo(() => new Map(parts.map((p) => [p.unit_id, p])), [parts]);
   const plateProblems = (pl: number) => parts.some((p) => p.placement.plate === pl && problems.has(p.unit_id));
-  const blocked = check.off_plate.length > 0 || check.collisions.length > 0 || check.too_tall.length > 0 || bigger.length > 0;
+  // Sending is blocked only by what can't print: off the plate, too tall, bigger than the bed,
+  // or (by object) two parts taller than the gantry. Overlaps and clearance warn but allow it.
+  const gantryClash = settings.sequence === "by_object" && check.taller_than_gantry.length >= 2;
+  const blocked = check.off_plate.length > 0 || check.too_tall.length > 0 || bigger.length > 0 || gantryClash;
 
   // ---- scene --------------------------------------------------------------------------------
   useEffect(() => {
@@ -393,7 +400,11 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        undo();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
       } else if (mod && e.key.toLowerCase() === "a") {
         e.preventDefault();
         setSelected(new Set(parts.filter((p) => p.placement.plate === plate).map((p) => p.unit_id)));
@@ -536,7 +547,7 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
     setLive(null);
     if (d.moved) {
       history.current.push(d.base);
-      setUndoCount(history.current.size);
+      bumpHistory();
     }
   };
 
@@ -657,8 +668,11 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
               <button type="button" className="fp-plate-tool" onClick={addPlate}>
                 <Icon icon={Plus} size={14} /> Add plate
               </button>
-              <button type="button" className="fp-plate-tool" onClick={undo} disabled={undoCount === 0} title="Undo (⌘Z / Ctrl+Z)">
+              <button type="button" className="fp-plate-tool" onClick={undo} disabled={!history.current.canUndo} title="Undo (⌘Z / Ctrl+Z)">
                 <Icon icon={Undo2} size={14} />
+              </button>
+              <button type="button" className="fp-plate-tool" onClick={redo} disabled={!history.current.canRedo} title="Redo (⇧⌘Z / Ctrl+Shift+Z)">
+                <Icon icon={Redo2} size={14} />
               </button>
               {tool === "face" && (
                 <div className="fp-mode-toggle fp-plate-facemode" role="radiogroup" aria-label="Faces">
@@ -735,7 +749,8 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
                 {parts.length} part{parts.length === 1 ? "" : "s"} · {Math.round(fill * 100)}% of the bed used · tallest part {Math.round(tallest)}
                 {bed.height_mm ? ` of ${Math.round(bed.height_mm)}` : ""} mm
                 {nSel ? ` · ${nSel} selected` : ""}
-                {byObject && check.taller_than_gantry.length ? ` · ${check.taller_than_gantry.length} taller than the gantry, printed last` : ""}
+                {byObject && check.taller_than_gantry.length === 1 ? " · 1 taller than the gantry, prints last" : ""}
+                {gantryClash ? ` · ${check.taller_than_gantry.length} taller than the gantry clearance` : ""}
               </span>
             </div>
           </div>
@@ -824,12 +839,18 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
 
         <div className="fp-plate-footer">
           <span className="fp-plate-footnote">
-            {blocked ? "Fix the parts marked red before sending." : "Slot numbers come from the printer's loaded filament, as before. Removed parts stay in Parts to Print."}
+            {blocked
+              ? gantryClash
+                ? "Only one part taller than the gantry clearance can print by object. Move one to another plate or print by layer."
+                : "Parts off the plate or too big can't be sent. Move or turn them first."
+              : check.collisions.length
+                ? "Some parts overlap. They'll overlap in the slicer too."
+                : "Slot numbers come from the printer's loaded filament, as before. Removed parts stay in Parts to Print."}
           </span>
           <button type="button" className="fp-btn fp-btn-sm" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" disabled={blocked || !parts.length || !!busy} onClick={send} title={blocked ? "Some parts overlap, are off the plate, or are too big" : "Send to the slicer"}>
+          <button type="button" className="fp-btn fp-btn-sm fp-btn-primary" disabled={blocked || !parts.length || !!busy} onClick={send} title={blocked ? "Some parts can't print as laid out" : "Send to the slicer"}>
             <Icon icon={PrinterIcon} size={14} /> {plateCount > 1 ? `Send ${plateCount} plates to slicer` : "Send to slicer"}
           </button>
         </div>

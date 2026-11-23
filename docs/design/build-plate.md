@@ -29,7 +29,7 @@ any built-in printer model or brand. Splitting a part into separate objects is a
 3. **The full view opens only on request.** It opens from **Arrange plate…**. When something
    doesn't fit, the summary turns red and says what's wrong ("Needs 2 plates", "Tray is taller
    than this printer"). The user chooses whether to open the view or send anyway. It never opens
-   by itself. *(Default pending Donnie.)*
+   by itself. *(Approved default.)*
 4. **Plate view** (mockups 2–5):
    - **Header:** printer and its size, and **Print sequence: By layer / By object**.
    - **Left column:** one thumbnail per plate (number, part count, red badge when something is
@@ -39,7 +39,7 @@ any built-in printer model or brand. Splitting a part into separate objects is a
    - **Viewport:** the printer's plate to scale, parts in their filament colors with soft shadows,
      orbit / pan / zoom, fit-to-view and top-view buttons.
    - **Side list:** parts with color, size and plate. In By object it becomes the print order,
-     and you drag rows to reorder them. *(Default pending Donnie.)*
+     and you drag rows to reorder them. *(Approved default.)*
    - **Status line, footer:** "Fits on one plate", or what's wrong. Cancel, then
      Send to slicer, or Send Plate 1 only / Send N plates to slicer.
 
@@ -48,7 +48,7 @@ any built-in printer model or brand. Splitting a part into separate objects is a
 | Action | Behavior |
 |---|---|
 | Select | Click a part. Shift-click adds. **Drag on empty bed draws a marquee** (dashed outline, translucent fill), and parts inside are selected. Selected parts get a crisp white outline. |
-| Delete | Removes the selected parts **from this job only**. They stay in Parts to Print. Undo brings them back. *(Default pending Donnie.)* |
+| Delete | Removes the selected parts **from this job only**. They stay in Parts to Print. Undo brings them back. *(Approved default.)* |
 | Move | Click-drag a part on the bed. A move gizmo, and arrow keys (1 mm, Shift 10 mm), are also available. Parts that collide or go off the plate turn red live while dragging. |
 | Rotate | Rotate gizmo around Z. R rotates 90°. |
 | Auto orient | Each selected part (or all) turns onto its best flat pose. The rotation is animated. |
@@ -90,9 +90,14 @@ Printer settings:
   - `object_clearance_height_mm`: nozzle tip to the lowest part of the gantry.
   When blank, By object uses Spacing alone and says the clearance isn't set, with a link to the
   printer's settings. No values are built in for any printer model.
+- As built: the clearance values and the arrange settings below are stored per printer in shop
+  settings (`printer_plate`: printer id -> `spacing_mm`, `auto_rotate`, `align_y`, `sequence`,
+  `clearance_radius_mm`, `clearance_height_mm`), with generic defaults (5 mm spacing, 35 mm
+  clearance radius, 30 mm clearance height) that aren't tied to any printer model. Moving the
+  clearance values onto the printer itself is a follow-up for the printer settings screen.
 - Arrange settings, remembered per printer (stored with the printer or in shop settings):
   `arrange_spacing_mm` (default 5), `arrange_auto_rotate` (default on), `arrange_align_y`
-  (default off), `print_sequence` (default by layer). *(5 mm default pending Donnie.)*
+  (default off), `print_sequence` (default by layer). *(5 mm default approved.)*
 - The new columns are added on open when missing, the same way as `bed_z_mm`. No schema version
   change, and `#[serde(default)]` on the model.
 
@@ -101,7 +106,7 @@ Print! request (src-tauri):
 - New optional `layout` on the Print! command. Per unit: `{ plate, x_mm, y_mm, rot_z_deg,
   orientation: quaternion }`, plus `print_sequence` and the by-object order. When it's absent,
   Print! arranges automatically, so the one-click path and old callers keep working.
-- Multiple plates: **one .3mf per plate**, sent together. *(Default pending Donnie.)* A single
+- Multiple plates: **one .3mf per plate**, sent together. *(Approved default.)* A single
   multi-plate file needs slicer-specific metadata, so it stays a later option.
 
 fp-mesh:
@@ -235,9 +240,9 @@ Not used: anything from slicer source trees (AGPL-3.0), or `libnest2d` (LGPL-3.0
   undo, drag turning red, the toast's Jump to, and settings remembered after reopening.
 - Performance: arrange of 50 parts under 300 ms; drag frame checks under 4 ms.
 
-## Defaults pending Donnie
+## Approved defaults
 
-These are the defaults proposed by the team. Change any of them before phase 1.
+Approved before phase 1.
 
 1. Multiple plates: one .3mf per plate.
 2. When parts don't fit: a red summary, and the user chooses. The view never opens by itself.

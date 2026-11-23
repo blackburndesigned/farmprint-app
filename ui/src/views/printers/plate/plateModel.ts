@@ -293,19 +293,32 @@ export function platesInUse(parts: PlatePart[]): number {
   return parts.reduce((m, p) => Math.max(m, p.placement.plate + 1), 0);
 }
 
-/** Undo history: past states, newest last. Capped so long sessions stay small. */
+/** Undo / redo history: past and undone states, newest last. Capped so long sessions stay small. */
 export class History {
   private past: PlateState[] = [];
+  private future: PlateState[] = [];
   constructor(private readonly cap = 60) {}
+  /** Records the state before a change; a new change clears redo. */
   push(s: PlateState) {
     this.past.push(s);
     if (this.past.length > this.cap) this.past.shift();
+    this.future = [];
   }
-  pop(): PlateState | undefined {
-    return this.past.pop();
+  undo(current: PlateState): PlateState | undefined {
+    const prev = this.past.pop();
+    if (prev) this.future.push(current);
+    return prev;
   }
-  get size() {
-    return this.past.length;
+  redo(current: PlateState): PlateState | undefined {
+    const next = this.future.pop();
+    if (next) this.past.push(current);
+    return next;
+  }
+  get canUndo() {
+    return this.past.length > 0;
+  }
+  get canRedo() {
+    return this.future.length > 0;
   }
 }
 
