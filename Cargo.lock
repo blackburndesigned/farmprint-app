@@ -1011,6 +1011,7 @@ dependencies = [
  "png 0.17.16",
  "quick-xml",
  "serde",
+ "serde_json",
  "zip 0.6.6",
 ]
 

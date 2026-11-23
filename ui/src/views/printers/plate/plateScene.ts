@@ -40,6 +40,8 @@ export class PlateScene {
   readonly controls: OrbitControls;
   private bedGroup = new THREE.Group();
   private overlay = new THREE.Group();
+  private reachGroup = new THREE.Group();
+  private reachKey = "";
   private parts = new Map<string, PartObj>();
   private geos = new Map<string, { geo: THREE.BufferGeometry }>();
   /** Outline thickness in mm, kept about 2 px on screen (updated every frame). */
@@ -87,7 +89,7 @@ export class PlateScene {
     fill.position.set(1, 0.6, 0.8);
     this.scene.add(fill);
     this.key = key;
-    this.scene.add(this.bedGroup, this.overlay);
+    this.scene.add(this.bedGroup, this.overlay, this.reachGroup);
     this.resize();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -113,11 +115,15 @@ export class PlateScene {
     this.camera.updateProjectionMatrix();
   }
 
-  setBed(bed: BedSize, plateLabel: string) {
+  /** The bed; `shade` hatches where no print area reaches (`none`) and, more lightly, where
+   *  only some nozzles reach (`partial`), with `edges` drawn as thin dashed lines. */
+  setBed(bed: BedSize, plateLabel: string, shade?: BedShade) {
     this.bed = bed;
+    for (const c of this.bedGroup.children) disposeObj(c);
     this.bedGroup.clear();
+    this.reachKey = "";
     const { width_mm: w, depth_mm: d } = bed;
-    const tex = gridTexture(w, d);
+    const tex = gridTexture(w, d, shade);
     const top = new THREE.Mesh(
       new THREE.BoxGeometry(w, d, 2),
       [
@@ -311,6 +317,50 @@ export class PlateScene {
     }
   }
 
+  /** Dims the bed outside `rect` (where the selected parts can go) and outlines it, with
+   *  `label` at its back edge. Null clears it. */
+  setReach(rect: [number, number, number, number] | null, label: string) {
+    const key = rect ? `${rect.join(",")}|${label}|${this.bed.width_mm}x${this.bed.depth_mm}` : "";
+    if (key === this.reachKey) return;
+    this.reachKey = key;
+    for (const c of this.reachGroup.children) disposeObj(c);
+    this.reachGroup.clear();
+    if (!rect) return;
+    const { width_mm: w, depth_mm: d } = this.bed;
+    const scale = Math.min(4, 2048 / Math.max(w, d));
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * scale);
+    c.height = Math.round(d * scale);
+    const g = c.getContext("2d")!;
+    const X = (mm: number) => mm * scale;
+    const Y = (mm: number) => c.height - mm * scale;
+    const [x0, y0, x1, y1] = [Math.max(0, rect[0]), Math.max(0, rect[1]), Math.min(w, rect[2]), Math.min(d, rect[3])];
+    g.fillStyle = "rgba(8,9,12,0.42)";
+    g.fillRect(0, 0, c.width, c.height);
+    if (x1 > x0 && y1 > y0) {
+      g.clearRect(X(x0), Y(y1), X(x1) - X(x0), Y(y0) - Y(y1));
+      g.strokeStyle = "rgba(10,132,255,0.95)";
+      g.lineWidth = Math.max(2, scale * 0.8);
+      g.setLineDash([scale * 4, scale * 2.5]);
+      g.strokeRect(X(x0) + 1, Y(y1) + 1, X(x1) - X(x0) - 2, Y(y0) - Y(y1) - 2);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }));
+    plane.position.set(w / 2, d / 2, 0.06);
+    plane.renderOrder = 1;
+    this.reachGroup.add(plane);
+    if (label && x1 > x0 && y1 > y0) {
+      const k = Math.max(w, d) / 256;
+      const tag = textPlane(label, 40, "#ffffff", "rgba(10,132,255,0.92)");
+      tag.scale.setScalar(k * 0.8);
+      tag.position.set((x0 + x1) / 2, Math.min(d, y1) + 7 * k, 0.08);
+      tag.renderOrder = 3;
+      this.reachGroup.add(tag);
+    }
+  }
+
   private numTex(n: number) {
     let t = this.numberTex.get(n);
     if (!t) {
@@ -494,7 +544,14 @@ function numberSpot(outline: V2[], bed: BedSize, gap: number): V2 {
   return [Math.max(gap, Math.min(bed.width_mm - gap, cx)), Math.max(gap * 0.6, Math.min(bed.depth_mm - gap * 0.6, y))];
 }
 
-function gridTexture(w: number, d: number): THREE.Texture {
+/** Bed shading for print areas (bed mm rectangles `[x0, y0, x1, y1]`). */
+export interface BedShade {
+  none: [number, number, number, number][];
+  partial: [number, number, number, number][];
+  edges: [number, number, number, number][];
+}
+
+function gridTexture(w: number, d: number, shade?: BedShade): THREE.Texture {
   const px = 4;
   const c = document.createElement("canvas");
   const scale = Math.min(px, 2048 / Math.max(w, d));
@@ -519,6 +576,52 @@ function gridTexture(w: number, d: number): THREE.Texture {
       g.lineTo(c.width, c.height - mm * scale);
       g.stroke();
     }
+  }
+  if (shade) {
+    const X = (mm: number) => mm * scale;
+    const Y = (mm: number) => c.height - mm * scale;
+    const hatch = (r: [number, number, number, number], fill: string, line: string, gap: number) => {
+      const [x0, y0, x1, y1] = [X(r[0]), Y(r[3]), X(r[2]), Y(r[1])];
+      g.save();
+      g.beginPath();
+      g.rect(x0, y0, x1 - x0, y1 - y0);
+      g.clip();
+      g.fillStyle = fill;
+      g.fillRect(x0, y0, x1 - x0, y1 - y0);
+      g.strokeStyle = line;
+      g.lineWidth = Math.max(1.5, scale * 0.45);
+      const step = gap * scale;
+      for (let k = -c.height; k < c.width + c.height; k += step) {
+        g.beginPath();
+        g.moveTo(k, c.height);
+        g.lineTo(k + c.height, 0);
+        g.stroke();
+      }
+      g.restore();
+    };
+    // Where no nozzle reaches: plainly off-limits. Where only one does: a light hatch.
+    for (const r of shade.none) hatch(r, "rgba(0,0,0,0.30)", "rgba(255,255,255,0.13)", 5);
+    for (const r of shade.partial) hatch(r, "rgba(0,0,0,0.10)", "rgba(255,255,255,0.075)", 7);
+    g.strokeStyle = "rgba(255,255,255,0.28)";
+    g.lineWidth = Math.max(1.5, scale * 0.4);
+    g.setLineDash([scale * 3, scale * 2]);
+    for (const r of shade.edges) {
+      for (const xmm of [r[0], r[2]]) {
+        if (xmm <= 0.01 || xmm >= w - 0.01) continue;
+        g.beginPath();
+        g.moveTo(X(xmm), Y(Math.max(0, r[1])));
+        g.lineTo(X(xmm), Y(Math.min(d, r[3])));
+        g.stroke();
+      }
+      for (const ymm of [r[1], r[3]]) {
+        if (ymm <= 0.01 || ymm >= d - 0.01) continue;
+        g.beginPath();
+        g.moveTo(X(Math.max(0, r[0])), Y(ymm));
+        g.lineTo(X(Math.min(w, r[2])), Y(ymm));
+        g.stroke();
+      }
+    }
+    g.setLineDash([]);
   }
   g.strokeStyle = "rgba(255,255,255,0.35)";
   g.lineWidth = 3;

@@ -83,3 +83,10 @@ html:not([data-theme="light"]) .fp-fit-bad { color: #ff6961; }
 .fp-plate-thumb { flex-shrink: 0; border-radius: 6px; }
 .fp-link-btn { border: none; background: none; padding: 0; color: #0a84ff; font: inherit; font-weight: 650; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; }
 .fp-link-btn:hover { text-decoration: underline; }
+/* Print areas */
+.fp-plate-dragmsg { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; background: #ff453a; color: #fff; font-size: 12px; font-weight: 600; box-shadow: 0 6px 18px rgba(0,0,0,.25); pointer-events: none; white-space: nowrap; }
+.fp-plate-rowbad { display: block; color: #e0352b; font-weight: 600; font-size: 11px; }
+.fp-plate-rowarea { display: block; color: var(--text-muted); font-size: 11px; }
+.fp-plate-thumb-noarea { fill: rgba(0,0,0,.38); }
+.fp-plate-thumb-partarea { fill: rgba(0,0,0,.16); }
+.fp-plate-pop-sub { font-size: 11px; color: var(--text-muted); margin: 6px 0 2px; }

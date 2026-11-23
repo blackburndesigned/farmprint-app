@@ -4,7 +4,8 @@
 
 use crate::AppState;
 use fp_mesh::plate::{
-    self, ArrangeItem, ArrangeSettings, BedSize, FaceMode, Footprint, Placement, PlannedPart, Quat,
+    self, ArrangeItem, ArrangeSettings, BedSize, FaceMode, Footprint, Placement, PlannedPart,
+    PrintAreaSpec, Quat, Reach,
 };
 use fp_mesh::TriangleMesh;
 use serde::Deserialize;
@@ -39,12 +40,29 @@ pub fn settings_for(state: &AppState, printer_id: Option<&str>) -> ArrangeSettin
     let Some(pid) = printer_id.filter(|p| !p.is_empty()) else {
         return ArrangeSettings::default();
     };
-    crate::shop_settings_for_plate(state)
+    let s = crate::shop_settings_for_plate(state)
         .ok()
         .and_then(|s| s.printer_plate.get(pid).cloned())
         .and_then(|v| serde_json::from_value::<ArrangeSettings>(v).ok())
         .map(sanitize)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    match state.ledger.lock() {
+        Ok(ledger) => with_printer_clearance(&ledger, pid, s),
+        Err(_) => s,
+    }
+}
+
+/// The arrange settings with the printer's extruder clearance (its four printer fields;
+/// empty ones fall back to the plate defaults). `printer_plate` only remembers spacing,
+/// auto-rotate, align to Y and sequence; clearance there is read only as an old fallback.
+pub fn with_printer_clearance(ledger: &fp_core::ShopLedger, printer_id: &str, mut s: ArrangeSettings) -> ArrangeSettings {
+    if let Ok(Some(c)) = ledger.printer_effective_clearance(printer_id) {
+        s.clearance_radius_mm = c.radius;
+        s.clearance_height_mm = c.height_to_rod;
+        s.clearance_dist_to_rod_mm = c.dist_to_rod;
+        s.clearance_height_to_lid_mm = c.height_to_lid;
+    }
+    sanitize(s)
 }
 
 fn sanitize(mut s: ArrangeSettings) -> ArrangeSettings {
@@ -53,7 +71,183 @@ fn sanitize(mut s: ArrangeSettings) -> ArrangeSettings {
     s.spacing_mm = fix(s.spacing_mm, d.spacing_mm, 100.0);
     s.clearance_radius_mm = fix(s.clearance_radius_mm, d.clearance_radius_mm, 500.0);
     s.clearance_height_mm = fix(s.clearance_height_mm, d.clearance_height_mm, 1000.0);
+    s.clearance_dist_to_rod_mm = s.clearance_dist_to_rod_mm.filter(|v| v.is_finite() && *v >= 0.0 && *v <= 2000.0);
+    s.clearance_height_to_lid_mm = s.clearance_height_to_lid_mm.filter(|v| v.is_finite() && *v > 0.0 && *v <= 2000.0);
     s
+}
+
+/// A printer's print areas as fp-mesh reads them (empty for a printer without areas).
+pub fn area_specs(areas: &[fp_core::PrintArea]) -> Vec<PrintAreaSpec> {
+    areas
+        .iter()
+        .filter(|a| a.width_mm > 0.0 && a.depth_mm > 0.0)
+        .map(|a| PrintAreaSpec {
+            name: a.name.clone(),
+            x_mm: a.x_mm,
+            y_mm: a.y_mm,
+            width_mm: a.width_mm,
+            depth_mm: a.depth_mm,
+            height_mm: Some(a.height_mm).filter(|h| h.is_finite() && *h > 0.0),
+            nozzle: Some(a.nozzle.as_str().to_string()),
+        })
+        .collect()
+}
+
+/// The printer slot each unit's filament gets in the slicer (the same slot match the plate
+/// file uses), as a list for `fp_core::print_areas`: empty when the filament isn't loaded
+/// (which counts as an unknown nozzle).
+pub fn unit_slots(units: &[(fp_core::PartUnit, String)], slots: &[fp_core::models::PrinterSlot]) -> Vec<Vec<i64>> {
+    let opts = crate::plate_options_for(units, None, slots);
+    let items: Vec<fp_mesh::PlateBuildItem> = units
+        .iter()
+        .map(|(u, _)| fp_mesh::PlateBuildItem {
+            name: String::new(),
+            filament_hex: u.filament_hex.clone(),
+            mesh: TriangleMesh { name: String::new(), positions: Vec::new(), indices: Vec::new() },
+        })
+        .collect();
+    let (numbers, filaments) = fp_mesh::assign_plate_filaments(&items, &opts);
+    numbers
+        .iter()
+        .map(|&n| {
+            if filaments.iter().any(|f| f.number == n && f.from_slot) {
+                vec![n as i64]
+            } else {
+                Vec::new()
+            }
+        })
+        .collect()
+}
+
+/// A printer holding only what `fp_core::print_areas` reads (feeders and areas).
+fn reach_printer(feeders: Vec<fp_core::models::PrinterFeeder>, areas: Vec<fp_core::PrintArea>) -> fp_core::Printer {
+    fp_core::Printer {
+        id: String::new(),
+        name: String::new(),
+        model: String::new(),
+        nozzle_mm: 0.4,
+        status: String::new(),
+        loaded_slots: Vec::new(),
+        active_units: Vec::new(),
+        staged_units: Vec::new(),
+        remaining_minutes: 0,
+        utilization_pct: 0.0,
+        bed_x_mm: None,
+        bed_y_mm: None,
+        bed_z_mm: None,
+        feeders,
+        print_areas: areas,
+        extruder_clearance: Default::default(),
+    }
+}
+
+fn reach_of(a: &fp_core::PrintArea) -> Reach {
+    let spec = &area_specs(std::slice::from_ref(a))[..];
+    match spec.first() {
+        Some(sp) => Reach { rect: sp.rect(), height_mm: sp.height_mm, label: a.name.trim().to_string() },
+        None => Reach { rect: [a.x_mm, a.y_mm, a.x_mm, a.y_mm], height_mm: None, label: a.name.trim().to_string() },
+    }
+}
+
+/// Where each part must sit, decided by `fp_core::print_areas`: all its slots on
+/// left-nozzle feeders -> the left area, all right -> the right area, a mix or a slot with
+/// no nozzle -> the "both" area; None = the whole bed. Also the nozzle label for the UI.
+pub struct ReachContext {
+    pub areas: Vec<PrintAreaSpec>,
+    /// "left" | "right" | "both", None when unknown (index-aligned with the units).
+    pub nozzles: Vec<Option<String>>,
+    /// The automatic reach per unit.
+    pub autos: Vec<Option<Reach>>,
+    /// The area both nozzles reach (the printer's "both" area), if it has one.
+    pub shared: Option<Reach>,
+}
+
+pub fn reach_context_for(
+    printer: &fp_core::Printer,
+    units: &[(fp_core::PartUnit, String)],
+    slots: &[fp_core::models::PrinterSlot],
+) -> ReachContext {
+    use fp_core::print_areas::{nozzle_need_for_slots, print_area_for_need, print_area_for_slots, NozzleNeed};
+    let areas = area_specs(&printer.print_areas);
+    if areas.is_empty() {
+        return ReachContext { areas, nozzles: vec![None; units.len()], autos: vec![None; units.len()], shared: None };
+    }
+    let per = unit_slots(units, slots);
+    let nozzles = per
+        .iter()
+        .map(|s| match nozzle_need_for_slots(printer, s) {
+            NozzleNeed::Left => Some("left".to_string()),
+            NozzleNeed::Right => Some("right".to_string()),
+            NozzleNeed::Both => Some("both".to_string()),
+            NozzleNeed::Unknown => None,
+        })
+        .collect();
+    let autos = per.iter().map(|s| print_area_for_slots(printer, s).map(reach_of)).collect();
+    let shared = print_area_for_need(printer, NozzleNeed::Both).map(reach_of);
+    ReachContext { areas, nozzles, autos, shared }
+}
+
+/// A printer's print areas and where each unit may sit (index-aligned with `units`).
+pub fn reach_context(
+    ledger: &fp_core::ShopLedger,
+    printer_id: Option<&str>,
+    units: &[(fp_core::PartUnit, String)],
+) -> Result<ReachContext, String> {
+    let none = || ReachContext { areas: Vec::new(), nozzles: vec![None; units.len()], autos: vec![None; units.len()], shared: None };
+    let Some(pid) = printer_id.filter(|p| !p.is_empty()) else {
+        return Ok(none());
+    };
+    let areas = ledger.printer_print_areas(pid).map_err(|e| e.to_string())?;
+    if areas.is_empty() {
+        return Ok(none());
+    }
+    let slots = ledger.printer_loaded_slots(pid).map_err(|e| e.to_string())?;
+    let feeders = ledger.printer_feeders(pid).map_err(|e| e.to_string())?;
+    Ok(reach_context_for(&reach_printer(feeders, areas), units, &slots))
+}
+
+/// Where each unit may sit: the picked area (`overrides`, by unit id: an area name, or
+/// "both"/"shared" for the area both nozzles reach; "auto" or missing = automatic), or
+/// None on a printer without areas.
+pub fn reaches_for(
+    ctx: &ReachContext,
+    units: &[(fp_core::PartUnit, String)],
+    overrides: &HashMap<String, String>,
+) -> Vec<Option<Reach>> {
+    units
+        .iter()
+        .enumerate()
+        .map(|(i, (u, _))| {
+            let auto = ctx.autos.get(i).cloned().flatten();
+            let pick = overrides.get(&u.id).map(|s| s.trim()).filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"));
+            match pick {
+                Some(p) if p.eq_ignore_ascii_case("shared") || p.eq_ignore_ascii_case("both") => ctx.shared.clone().or(auto),
+                Some(name) => plate::reach_for_area_name(&ctx.areas, name).or(auto),
+                None => auto,
+            }
+        })
+        .collect()
+}
+
+fn areas_json(ctx: &ReachContext) -> Value {
+    json!({
+        "list": ctx.areas.iter().map(|a| json!({
+            "name": a.name,
+            "rect": a.rect(),
+            "height_mm": a.height_mm,
+            "nozzle": a.nozzle_side(),
+        })).collect::<Vec<_>>(),
+        "shared": ctx.shared,
+    })
+}
+
+fn printer_reach(
+    state: &AppState,
+    printer: Option<&str>,
+    units: &[(fp_core::PartUnit, String)],
+) -> Result<ReachContext, String> {
+    let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+    reach_context(&ledger, printer, units)
 }
 
 /// Loads (and caches) the models for these units. Errors name the parts with no model.
@@ -146,7 +340,10 @@ fn check_json(c: &plate::PlateCheck, ids: &[String]) -> Value {
         "collisions": pairs(&c.collisions),
         "clearance_overlaps": pairs(&c.clearance_overlaps),
         "too_tall": c.too_tall.iter().map(id).collect::<Vec<_>>(),
+        "out_of_area": c.out_of_area.iter().map(id).collect::<Vec<_>>(),
         "taller_than_gantry": c.taller_than_gantry.iter().map(id).collect::<Vec<_>>(),
+        "rod_conflicts": pairs(&c.rod_conflicts),
+        "over_lid": c.over_lid.iter().map(id).collect::<Vec<_>>(),
         "order": c.order.iter().map(|o| o.iter().map(id).collect::<Vec<_>>()).collect::<Vec<_>>(),
         "plate1_fill": c.plate1_fill,
         "tallest_mm": c.tallest_mm,
@@ -167,12 +364,14 @@ pub fn prepare(state: &AppState, args: &Value) -> Result<Value, String> {
     let (units, meshes) = load_meshes(state, &unit_ids)?;
     let (bed, known) = bed_for(state, printer.as_deref())?;
     let settings = settings_for(state, printer.as_deref());
+    let ctx = printer_reach(state, printer.as_deref(), &units)?;
+    let reaches = reaches_for(&ctx, &units, &HashMap::new());
     let refs: Vec<&TriangleMesh> = meshes.iter().map(|m| m.as_ref()).collect();
-    let (planned, c) = plate::auto_layout(&refs, &[], &bed, &settings);
+    let (planned, c) = plate::auto_layout_with_reach(&refs, &[], &reaches, &bed, &settings);
     let ids: Vec<String> = units.iter().map(|(u, _)| u.id.clone()).collect();
     let mut mesh_json: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut parts = Vec::new();
-    for (((u, file), m), pl) in units.iter().zip(&meshes).zip(&planned) {
+    for (i, (((u, file), m), pl)) in units.iter().zip(&meshes).zip(&planned).enumerate() {
         let key = mesh_key(u, file);
         if !mesh_json.contains_key(&key) {
             let (pos, tris) = fp_mesh::weld_mesh(m);
@@ -196,12 +395,15 @@ pub fn prepare(state: &AppState, args: &Value) -> Result<Value, String> {
             "orientation": pl.orientation,
             "footprint": pl.footprint,
             "placement": pl.placement,
+            "nozzle": ctx.nozzles.get(i).cloned().flatten(),
+            "auto_reach": reaches.get(i).cloned().flatten(),
         }));
     }
     Ok(json!({
         "parts": parts,
         "meshes": mesh_json,
         "bed": bed_json(&bed, known),
+        "areas": areas_json(&ctx),
         "settings": settings,
         "check": check_json(&c, &ids),
     }))
@@ -216,6 +418,9 @@ struct PartState {
     placement: Option<Placement>,
     #[serde(default)]
     pinned: bool,
+    /// Where it may sit (the plate view sends the area it uses: auto or picked).
+    #[serde(default)]
+    reach: Option<Reach>,
 }
 
 fn identity() -> Quat {
@@ -253,6 +458,7 @@ pub fn arrange(state: &AppState, args: &Value) -> Result<Value, String> {
         if p.pinned {
             it.pinned = p.placement;
         }
+        it.reach = p.reach.clone();
         items.push(it);
         feet.push(f);
     }
@@ -276,11 +482,39 @@ pub fn check(state: &AppState, args: &Value) -> Result<Value, String> {
     let mut placements = Vec::new();
     for p in &parts {
         let m = mesh_for(&p.unit_id)?;
-        items.push(ArrangeItem::from_footprint(&plate::footprint(&m, p.orientation)));
+        items.push(ArrangeItem {
+            reach: p.reach.clone(),
+            ..ArrangeItem::from_footprint(&plate::footprint(&m, p.orientation))
+        });
         placements.push(p.placement.unwrap_or_default());
     }
     let ids: Vec<String> = parts.iter().map(|p| p.unit_id.clone()).collect();
     Ok(check_json(&plate::check(&items, &placements, &bed, &s), &ids))
+}
+
+/// `plate_printer {unit_ids, printer_id?}` → the printer's bed, settings, print areas and
+/// each part's nozzle and automatic reach, for switching printers inside the plate view.
+pub fn printer(state: &AppState, args: &Value) -> Result<Value, String> {
+    let unit_ids = str_list(args, "unit_ids");
+    let printer = printer_arg(args);
+    let units = {
+        let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+        ledger.units_by_ids(&unit_ids).map_err(|e| e.to_string())?
+    };
+    let (bed, known) = bed_for(state, printer.as_deref())?;
+    let ctx = printer_reach(state, printer.as_deref(), &units)?;
+    let reaches = reaches_for(&ctx, &units, &HashMap::new());
+    let parts: serde_json::Map<String, Value> = units
+        .iter()
+        .enumerate()
+        .map(|(i, (u, _))| (u.id.clone(), json!({ "nozzle": ctx.nozzles[i], "auto_reach": reaches[i] })))
+        .collect();
+    Ok(json!({
+        "bed": bed_json(&bed, known),
+        "settings": settings_for(state, printer.as_deref()),
+        "areas": areas_json(&ctx),
+        "parts": parts,
+    }))
 }
 
 /// `plate_auto_orient {unit_ids}` → `{unit_id: {orientation, footprint}}`.
@@ -345,7 +579,9 @@ pub fn fit_summary(state: &AppState, args: &Value) -> Result<Value, String> {
     for pid in printer_ids {
         let (bed, known) = bed_for(state, Some(&pid))?;
         let s = settings_for(state, Some(&pid));
-        let (planned, c) = plate::auto_layout(&refs, &[], &bed, &s);
+        let ctx = printer_reach(state, Some(&pid), &units)?;
+        let reaches = reaches_for(&ctx, &units, &HashMap::new());
+        let (planned, c) = plate::auto_layout_with_reach(&refs, &[], &reaches, &bed, &s);
         let outlines: Vec<Value> = planned
             .iter()
             .zip(&units)
@@ -366,6 +602,7 @@ pub fn fit_summary(state: &AppState, args: &Value) -> Result<Value, String> {
                 "settings": s,
                 "check": check_json(&c, &ids),
                 "outlines": outlines,
+                "areas": areas_json(&ctx),
             }),
         );
     }
@@ -386,6 +623,19 @@ pub struct PrintLayoutPart {
     #[serde(default = "identity")]
     pub orientation: Quat,
     pub placement: Placement,
+    /// The print area picked for it in the plate view; None or "auto" = by its nozzle.
+    #[serde(default)]
+    pub area: Option<String>,
+}
+
+impl PrintLayout {
+    /// Picked areas by unit id.
+    pub fn area_overrides(&self) -> HashMap<String, String> {
+        self.parts
+            .iter()
+            .filter_map(|p| p.area.clone().map(|a| (p.unit_id.clone(), a)))
+            .collect()
+    }
 }
 
 /// Groups units into plates with exact 3MF transforms. With `layout` (from the plate view)
@@ -398,6 +648,7 @@ pub fn plan_plates(
     layout: Option<&PrintLayout>,
     bed: &BedSize,
     s: &ArrangeSettings,
+    reaches: &[Option<Reach>],
 ) -> Result<Vec<Vec<(usize, [f64; 12])>>, String> {
     match layout {
         Some(l) => {
@@ -415,6 +666,20 @@ pub fn plan_plates(
             }
             if entries.len() != units.len() {
                 return Err("the plate layout doesn't include every part".to_string());
+            }
+            // A part where its nozzle can't reach would print in the air: refuse it.
+            if reaches.iter().any(|r| r.is_some()) {
+                for (i, p) in &entries {
+                    let Some(r) = reaches.get(*i).cloned().flatten() else { continue };
+                    let item = ArrangeItem { reach: Some(r.clone()), ..ArrangeItem::from_footprint(&p.footprint) };
+                    let c = plate::check(std::slice::from_ref(&item), std::slice::from_ref(&p.placement), bed, s);
+                    if !c.out_of_area.is_empty() {
+                        return Err(format!("{} is where the {} can't reach", units[*i].0.part_name, r.label.to_lowercase()));
+                    }
+                    if !c.too_tall.is_empty() {
+                        return Err(format!("{} is taller than the {} can print", units[*i].0.part_name, r.label.to_lowercase()));
+                    }
+                }
             }
             // Order: the plate view's print order when given, else as listed.
             let rank = |id: &str| -> usize {
@@ -436,7 +701,7 @@ pub fn plan_plates(
         }
         None => {
             let refs: Vec<&TriangleMesh> = meshes.iter().collect();
-            let (planned, c) = plate::auto_layout(&refs, &[], bed, s);
+            let (planned, c) = plate::auto_layout_with_reach(&refs, &[], reaches, bed, s);
             Ok(plate::plate_groups(&planned, &c)
                 .into_iter()
                 .map(|g| g.into_iter().map(|i| (i, planned[i].transform())).collect())
@@ -479,7 +744,7 @@ mod tests {
         let units: Vec<_> = (0..5).map(|i| unit(&format!("u{i}"))).collect();
         let meshes: Vec<_> = (0..5).map(|_| cube(50.0)).collect();
         let bed = BedSize { width_mm: 110.0, depth_mm: 110.0, height_mm: None };
-        let plates = plan_plates(&units, &meshes, None, &bed, &ArrangeSettings::default()).unwrap();
+        let plates = plan_plates(&units, &meshes, None, &bed, &ArrangeSettings::default(), &[]).unwrap();
         assert_eq!(plates.len(), 2);
         assert_eq!(plates[0].len() + plates[1].len(), 5);
     }
@@ -490,13 +755,13 @@ mod tests {
         let meshes: Vec<_> = (0..2).map(|_| cube(20.0)).collect();
         let layout = PrintLayout {
             parts: vec![
-                PrintLayoutPart { unit_id: "u1".into(), orientation: plate::IDENTITY, placement: Placement { plate: 1, x: 50.0, y: 60.0, rot_deg: 45.0 } },
-                PrintLayoutPart { unit_id: "u0".into(), orientation: plate::IDENTITY, placement: Placement { plate: 0, x: 30.0, y: 40.0, rot_deg: 0.0 } },
+                PrintLayoutPart { unit_id: "u1".into(), orientation: plate::IDENTITY, placement: Placement { plate: 1, x: 50.0, y: 60.0, rot_deg: 45.0 }, area: None },
+                PrintLayoutPart { unit_id: "u0".into(), orientation: plate::IDENTITY, placement: Placement { plate: 0, x: 30.0, y: 40.0, rot_deg: 0.0 }, area: None },
             ],
             order: vec![],
         };
         let bed = BedSize { width_mm: 200.0, depth_mm: 200.0, height_mm: None };
-        let plates = plan_plates(&units, &meshes, Some(&layout), &bed, &ArrangeSettings::default()).unwrap();
+        let plates = plan_plates(&units, &meshes, Some(&layout), &bed, &ArrangeSettings::default(), &[]).unwrap();
         assert_eq!(plates.len(), 2);
         assert_eq!(plates[0][0].0, 0);
         assert_eq!(plates[1][0].0, 1);
@@ -504,6 +769,159 @@ mod tests {
         assert!((t[9] - 20.0).abs() < 1e-9 && (t[10] - 30.0).abs() < 1e-9 && t[11].abs() < 1e-9, "{t:?}");
         // Missing parts are refused.
         let partial = PrintLayout { parts: vec![], order: vec![] };
-        assert!(plan_plates(&units, &meshes, Some(&partial), &bed, &ArrangeSettings::default()).is_err());
+        assert!(plan_plates(&units, &meshes, Some(&partial), &bed, &ArrangeSettings::default(), &[]).is_err());
+    }
+
+    fn unit_fil(id: &str, fil: &str, hex: &str) -> (fp_core::PartUnit, String) {
+        let (mut u, f) = unit(id);
+        u.filament_id = fil.into();
+        u.filament_hex = hex.into();
+        (u, f)
+    }
+
+    fn slot(i: i64, fil: &str, hex: &str) -> fp_core::models::PrinterSlot {
+        fp_core::models::PrinterSlot {
+            slot_index: i,
+            filament_id: fil.into(),
+            filament_name: String::new(),
+            filament_hex: hex.into(),
+            material: "PLA".into(),
+            brand: String::new(),
+        }
+    }
+
+    fn feeder(first: i64, n: i64, nozzle: Option<&str>) -> fp_core::models::PrinterFeeder {
+        fp_core::models::PrinterFeeder {
+            id: format!("f{first}"),
+            name: format!("F{first}"),
+            slot_count: n,
+            is_dry_box: false,
+            note: None,
+            first_slot: Some(first),
+            spools: vec![],
+            auto: false,
+            nozzle: nozzle.and_then(fp_core::models::FeederNozzle::parse),
+        }
+    }
+
+    /// Test data only, not any printer's real numbers.
+    fn dual_areas() -> Vec<PrintAreaSpec> {
+        let a = |name: &str, x: f64, w: f64| PrintAreaSpec {
+            name: name.into(),
+            x_mm: x,
+            y_mm: 0.0,
+            width_mm: w,
+            depth_mm: 320.0,
+            height_mm: Some(320.0),
+            nozzle: None,
+        };
+        vec![a("Left nozzle", 0.0, 325.0), a("Right nozzle", 20.0, 305.0)]
+    }
+
+    /// Test data only (left 325 wide at x=0, right 305 at x=20, both 300 at x=20), not
+    /// any printer's real numbers.
+    fn core_areas() -> Vec<fp_core::PrintArea> {
+        let a = |name: &str, nozzle: &str, x: f64, w: f64, h: f64| fp_core::PrintArea {
+            id: name.to_lowercase(),
+            name: name.into(),
+            nozzle: fp_core::models::AreaNozzle::parse(nozzle).unwrap(),
+            width_mm: w,
+            depth_mm: 320.0,
+            height_mm: h,
+            x_mm: x,
+            y_mm: 0.0,
+        };
+        vec![a("Left nozzle", "left", 0.0, 325.0, 320.0), a("Right nozzle", "right", 20.0, 305.0, 325.0), a("Both nozzles", "both", 20.0, 300.0, 320.0)]
+    }
+
+    #[test]
+    fn each_part_takes_the_area_core_picks_for_its_slots() {
+        let units = vec![
+            unit_fil("a", "fil-red", "#FF0000"),
+            unit_fil("b", "fil-blue", "#0000FF"),
+            unit_fil("c", "fil-green", "#00FF00"),
+            unit_fil("d", "fil-grey", "#777777"),
+        ];
+        let slots = vec![slot(1, "fil-red", "#FF0000"), slot(5, "fil-blue", "#0000FF"), slot(9, "fil-green", "#00FF00")];
+        let feeders = vec![feeder(1, 4, Some("left")), feeder(5, 4, Some("right")), feeder(9, 4, None)];
+        assert_eq!(unit_slots(&units, &slots), vec![vec![1], vec![5], vec![9], vec![]]);
+        let printer = reach_printer(feeders.clone(), core_areas());
+        let ctx = reach_context_for(&printer, &units, &slots);
+        assert_eq!(ctx.nozzles, vec![Some("left".into()), Some("right".into()), None, None]);
+        let reaches = reaches_for(&ctx, &units, &HashMap::new());
+        let r = |i: usize| reaches[i].clone().unwrap();
+        assert_eq!((r(0).rect, r(0).height_mm), ([0.0, 0.0, 325.0, 320.0], Some(320.0)));
+        assert_eq!((r(1).label.as_str(), r(1).height_mm), ("Right nozzle", Some(325.0)));
+        // A feeder with no nozzle set, or a filament not loaded: the "both" area.
+        assert_eq!(r(2).rect, [20.0, 0.0, 320.0, 320.0]);
+        assert_eq!(r(3), r(2));
+        assert_eq!(ctx.shared.clone().unwrap().rect, [20.0, 0.0, 320.0, 320.0]);
+        // Overrides: an area by name, "both", or auto.
+        let picks = HashMap::from([
+            ("b".to_string(), "Left nozzle".to_string()),
+            ("a".to_string(), "auto".to_string()),
+            ("d".to_string(), "both".to_string()),
+        ]);
+        let r2 = reaches_for(&ctx, &units, &picks);
+        assert_eq!(r2[1].as_ref().unwrap().rect[0], 0.0);
+        assert_eq!(r2[0], reaches[0]);
+        assert_eq!(r2[3], ctx.shared);
+        // No "both" area: a mixed/unknown part gets the whole bed (core's rule).
+        let two: Vec<_> = core_areas().into_iter().take(2).collect();
+        let ctx2 = reach_context_for(&reach_printer(feeders.clone(), two), &units, &slots);
+        assert!(ctx2.autos[2].is_none() && ctx2.autos[0].is_some());
+        // A printer without areas: no reach at all (whole bed, as before).
+        let ctx3 = reach_context_for(&reach_printer(feeders, Vec::new()), &units, &slots);
+        assert!(reaches_for(&ctx3, &units, &HashMap::new()).iter().all(|r| r.is_none()));
+    }
+
+    #[test]
+    fn print_refuses_a_layout_where_the_nozzle_cannot_reach() {
+        let units: Vec<_> = (0..2).map(|i| unit(&format!("u{i}"))).collect();
+        let meshes: Vec<_> = (0..2).map(|_| cube(10.0)).collect();
+        let bed = BedSize { width_mm: 325.0, depth_mm: 320.0, height_mm: None };
+        let right = plate::reach_for_nozzles(&dual_areas(), &[Some("right".into())]);
+        let reaches = vec![right.clone(), None];
+        let at = |x: f64| Placement { plate: 0, x, y: 100.0, rot_deg: 0.0 };
+        let layout = |x: f64| PrintLayout {
+            parts: vec![
+                PrintLayoutPart { unit_id: "u0".into(), orientation: plate::IDENTITY, placement: at(x), area: None },
+                PrintLayoutPart { unit_id: "u1".into(), orientation: plate::IDENTITY, placement: at(200.0), area: None },
+            ],
+            order: vec![],
+        };
+        let err = plan_plates(&units, &meshes, Some(&layout(10.0)), &bed, &ArrangeSettings::default(), &reaches).unwrap_err();
+        assert!(err.contains("right nozzle can't reach"), "{err}");
+        assert!(plan_plates(&units, &meshes, Some(&layout(100.0)), &bed, &ArrangeSettings::default(), &reaches).is_ok());
+        // Print! with no layout keeps the part in its area.
+        let plates = plan_plates(&units, &meshes, None, &bed, &ArrangeSettings::default(), &reaches).unwrap();
+        let t = plates.iter().flatten().find(|(i, _)| *i == 0).unwrap().1;
+        assert!(t[9] >= 20.0, "{t:?}");
+    }
+
+    #[test]
+    fn clearance_comes_from_the_printer_fields_with_plate_defaults() {
+        let mut ledger = fp_core::ShopLedger::open_in_memory().unwrap();
+        let pid = ledger.snapshot().unwrap().printers[0].id.clone();
+        let base = ArrangeSettings { sequence: plate::Sequence::ByObject, spacing_mm: 7.0, ..Default::default() };
+        // Nothing set: the plate defaults; the rest of the settings untouched.
+        let s = with_printer_clearance(&ledger, &pid, base);
+        assert_eq!((s.spacing_mm, s.clearance_radius_mm, s.clearance_height_mm), (7.0, 35.0, 30.0));
+        assert_eq!((s.clearance_dist_to_rod_mm, s.clearance_height_to_lid_mm), (None, None));
+        assert_eq!(s.dist_to_rod(), None, "no distance to rod set: check skipped");
+        ledger
+            .set_printer_extruder_clearance(
+                &pid,
+                fp_core::ExtruderClearance {
+                    extruder_clearance_radius: Some(40.0),
+                    extruder_clearance_dist_to_rod: Some(60.0),
+                    extruder_clearance_height_to_rod: Some(25.0),
+                    extruder_clearance_height_to_lid: Some(120.0),
+                },
+            )
+            .unwrap();
+        let s = with_printer_clearance(&ledger, &pid, base);
+        assert_eq!((s.clearance_radius_mm, s.clearance_height_mm), (40.0, 25.0));
+        assert_eq!((s.clearance_dist_to_rod_mm, s.clearance_height_to_lid_mm), (Some(60.0), Some(120.0)));
     }
 }

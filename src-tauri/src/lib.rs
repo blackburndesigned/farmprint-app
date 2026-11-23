@@ -504,7 +504,7 @@ fn build_plate_bytes(
 
 /// What the plate writer knows about the chosen printer: its bed (if set), its loaded
 /// filament slots, and which swatch each unit is printed in (index-aligned with `units`).
-fn plate_options_for(
+pub(crate) fn plate_options_for(
     units: &[(fp_core::PartUnit, String)],
     bed: Option<fp_mesh::PlateBed>,
     loaded_slots: &[fp_core::models::PrinterSlot],
@@ -587,6 +587,9 @@ fn plate_items_for(
 struct PlateLayoutPlan {
     bed: fp_mesh::plate::BedSize,
     settings: fp_mesh::plate::ArrangeSettings,
+    /// Where each part may sit (index-aligned with the units) on a printer with print
+    /// areas; empty for a printer without.
+    reaches: Vec<Option<fp_mesh::plate::Reach>>,
 }
 
 /// Builds one 3MF per plate, writes them to the handoff folder and opens each in the slicer
@@ -615,7 +618,7 @@ fn stage_and_open_plate(
         // One click: refuse only what no layout can fix (a part bigger than the bed or
         // taller than the printer); everything else spills onto more plates.
         let refs: Vec<&fp_mesh::TriangleMesh> = meshes.iter().collect();
-        let (_, c) = fp_mesh::plate::auto_layout(&refs, &[], &plan.bed, &plan.settings);
+        let (_, c) = fp_mesh::plate::auto_layout_with_reach(&refs, &[], &plan.reaches, &plan.bed, &plan.settings);
         let names = |ix: &[usize]| {
             let mut v: Vec<String> = Vec::new();
             for &i in ix {
@@ -644,8 +647,19 @@ fn stage_and_open_plate(
                 plan.bed.height_mm.unwrap_or_default()
             ));
         }
+        if let Some(&i) = c.out_of_area.first() {
+            let r = plan.reaches.get(i).cloned().flatten();
+            let (label, w, d) = r
+                .map(|r| (r.label.to_lowercase(), r.rect[2] - r.rect[0], r.rect[3] - r.rect[1]))
+                .unwrap_or_default();
+            return Err(format!(
+                "{} {} bigger than where the {label} can print ({w:.0} × {d:.0} mm)",
+                names(&c.out_of_area),
+                if c.out_of_area.len() == 1 { "is" } else { "are" },
+            ));
+        }
     }
-    let plates = plate_view::plan_plates(units_with_meshes, meshes, layout, &plan.bed, &plan.settings)?;
+    let plates = plate_view::plan_plates(units_with_meshes, meshes, layout, &plan.bed, &plan.settings, &plan.reaches)?;
     let all_items = plate_items_for(units_with_meshes, meshes);
     let all_filaments = std::mem::take(&mut options.item_filaments);
     let home = std::env::var("HOME")
@@ -750,6 +764,11 @@ fn print_handoff(
             .and_then(|pid| settings.printer_plate.get(pid).cloned())
             .and_then(|v| serde_json::from_value::<fp_mesh::plate::ArrangeSettings>(v).ok())
             .unwrap_or_default();
+        // By-object clearance comes from the printer's own fields.
+        let arrange = match request.printer_id.as_deref() {
+            Some(pid) => plate_view::with_printer_clearance(&ledger, pid, arrange),
+            None => arrange,
+        };
         let b = bed.unwrap_or_default();
         let plan = PlateLayoutPlan {
             bed: fp_mesh::plate::BedSize {
@@ -758,7 +777,15 @@ fn print_handoff(
                 height_mm: z,
             },
             settings: arrange,
+            reaches: Vec::new(),
         };
+        let mut plan = plan;
+        // Print areas: each part sits where the nozzle printing its filament reaches.
+        let ctx = plate_view::reach_context(&ledger, request.printer_id.as_deref(), &units)?;
+        if !ctx.areas.is_empty() {
+            let picks = layout.as_ref().map(|l| l.area_overrides()).unwrap_or_default();
+            plan.reaches = plate_view::reaches_for(&ctx, &units, &picks);
+        }
         // The bed size plus the printer's loaded slots, so slot N is filament N in the slicer.
         let bed = plate_options_for(&units, bed, &slots);
         (units, name, bed, choice, plan)
@@ -1208,6 +1235,7 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
         "plate_fit_summary" => plate_view::fit_summary(state, &args),
         "plate_arrange" => plate_view::arrange(state, &args),
         "plate_check" => plate_view::check(state, &args),
+        "plate_printer" => plate_view::printer(state, &args),
         "plate_auto_orient" => plate_view::auto_orient(state, &args),
         "plate_footprint" => plate_view::footprint(state, &args),
         "plate_face_candidates" => plate_view::face_candidates(state, &args),

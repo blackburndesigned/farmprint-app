@@ -728,6 +728,7 @@ export default function App() {
             unitIds={plateView.req.unit_ids}
             printers={snapshot.printers}
             printerId={plateView.printerId}
+            onSnapshot={(snap) => setSnapshot(snap)}
             onCancel={() => {
               setPendingPrint(plateView);
               setPlateView(null);
