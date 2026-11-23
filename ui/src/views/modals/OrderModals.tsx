@@ -5,6 +5,7 @@ import { invoke } from "../../tauriInvoke";
 import { isThumbnailOnlyUnit } from "../../partThumbnails";
 import { notifyError } from "../../uiFeedback";
 import { FilamentSwatch, Order, PartUnit, Printer, Product, ShopSnapshot, TransitionRequest } from "../../types";
+import { printerOptionLabel } from "../../printerLabels";
 import { CreatedCatalogProductPayload } from "../../components/ProductImportModal3D";
 import { forgetOrderThumbs } from "../../orderLineThumbs";
 import { KittingCardModal } from "./KittingCardModal";
@@ -359,7 +360,7 @@ export const OrderModals: React.FC<{
                   >
                     {sortedPrinters.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} ({p.model})
+                        {printerOptionLabel(p.name, p.model)}
                       </option>
                     ))}
                   </select>

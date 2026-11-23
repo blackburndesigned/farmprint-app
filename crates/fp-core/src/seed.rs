@@ -41,9 +41,14 @@ pub const FLOW_UNDO_COLUMNS: [(&str, &str); 6] = [
     ("prev_plate_job_id", "TEXT"),
 ];
 
-/// Printer bed size in mm (2026-11-18): nullable, additive. NULL = unknown (plate
-/// building keeps its 220 mm default). Schema version unchanged (3).
-pub const PRINTER_BED_COLUMNS: [(&str, &str); 2] = [("bed_x_mm", "REAL"), ("bed_y_mm", "REAL")];
+/// Printer bed size in mm (2026-11-18) and build height (2026-11-22): nullable,
+/// additive. NULL = not set (plate building still uses only width and depth,
+/// and keeps its 220 mm default when those are unset). Schema version unchanged (3).
+pub const PRINTER_BED_COLUMNS: [(&str, &str); 3] = [
+    ("bed_x_mm", "REAL"),
+    ("bed_y_mm", "REAL"),
+    ("bed_z_mm", "REAL"),
+];
 
 /// Filament vendor/source (2026-11-22): nullable, additive. Schema version unchanged (3).
 /// Existing rows stay NULL and show as unspecified in the library.

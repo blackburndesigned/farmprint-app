@@ -75,6 +75,17 @@ pub fn validate_bed_size(x: Option<f64>, y: Option<f64>) -> CoreResult<(Option<f
     }
 }
 
+/// Optional build height in mm: unset, or 50–2000 mm. Independent of width and depth.
+pub fn validate_bed_height(z: Option<f64>) -> CoreResult<Option<f64>> {
+    match z {
+        None => Ok(None),
+        Some(v) if v.is_finite() && (50.0..=2000.0).contains(&v) => Ok(Some(v)),
+        Some(v) => Err(CoreError::Validation(format!(
+            "Build height {v} mm is out of range (50–2000 mm)."
+        ))),
+    }
+}
+
 /// Days of history kept on top of the newest `keep` backups: the newest backup of each of
 /// the last `DAILY_BACKUP_DAYS` days is never pruned, so a problem noticed a week later
 /// still has a good copy to go back to.
@@ -1740,10 +1751,11 @@ impl ShopLedger {
         nozzle_mm: f64,
         slot_filament_ids: Vec<String>,
     ) -> CoreResult<ShopSnapshot> {
-        self.add_printer_with_bed(name, model, nozzle_mm, slot_filament_ids, None, None)
+        self.add_printer_with_bed(name, model, nozzle_mm, slot_filament_ids, None, None, None)
     }
 
-    /// `add_printer` with an optional bed size in mm (both or neither; see `validate_bed_size`).
+    /// `add_printer` with an optional bed size (width and depth, both or neither) and
+    /// an optional build height in mm (see `validate_bed_size` and `validate_bed_height`).
     pub fn add_printer_with_bed(
         &mut self,
         name: String,
@@ -1752,14 +1764,29 @@ impl ShopLedger {
         slot_filament_ids: Vec<String>,
         bed_x_mm: Option<f64>,
         bed_y_mm: Option<f64>,
+        bed_z_mm: Option<f64>,
     ) -> CoreResult<ShopSnapshot> {
         let (bed_x_mm, bed_y_mm) = validate_bed_size(bed_x_mm, bed_y_mm)?;
+        let bed_z_mm = validate_bed_height(bed_z_mm)?;
+        // No built-in model names. A blank name becomes "Printer N"; a blank model stays blank.
+        let name = {
+            let t = name.trim();
+            if !t.is_empty() {
+                t.to_string()
+            } else {
+                let count: i64 = self
+                    .conn
+                    .query_row("SELECT COUNT(*) FROM printers", [], |r| r.get(0))?;
+                format!("Printer {}", count + 1)
+            }
+        };
+        let model = model.trim().to_string();
         let id = format!("prn-{}", &Uuid::new_v4().to_string()[..8]);
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO printers (id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm)
-             VALUES (?1, ?2, ?3, ?4, 'Idle', 0.0, ?5, ?6)",
-            params![id, name.trim(), model.trim(), nozzle_mm, bed_x_mm, bed_y_mm],
+            "INSERT INTO printers (id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm, bed_z_mm)
+             VALUES (?1, ?2, ?3, ?4, 'Idle', 0.0, ?5, ?6, ?7)",
+            params![id, name, model, nozzle_mm, bed_x_mm, bed_y_mm, bed_z_mm],
         )?;
         for (idx, fid) in slot_filament_ids.iter().enumerate() {
             if !fid.trim().is_empty() {
@@ -1774,18 +1801,20 @@ impl ShopLedger {
         self.snapshot()
     }
 
-    /// Sets (or clears, with None/None) a printer's bed size in mm. Both values or neither;
-    /// each must be between 50 and 2000 mm.
+    /// Sets (or clears) a printer's bed size in mm. Width and depth are both or neither;
+    /// build height is independent and optional. Each set value must be 50–2000 mm.
     pub fn set_printer_bed_size(
         &mut self,
         printer_id: &str,
         bed_x_mm: Option<f64>,
         bed_y_mm: Option<f64>,
+        bed_z_mm: Option<f64>,
     ) -> CoreResult<ShopSnapshot> {
         let (x, y) = validate_bed_size(bed_x_mm, bed_y_mm)?;
+        let z = validate_bed_height(bed_z_mm)?;
         let n = self.conn.execute(
-            "UPDATE printers SET bed_x_mm = ?2, bed_y_mm = ?3 WHERE id = ?1",
-            params![printer_id, x, y],
+            "UPDATE printers SET bed_x_mm = ?2, bed_y_mm = ?3, bed_z_mm = ?4 WHERE id = ?1",
+            params![printer_id, x, y, z],
         )?;
         if n == 0 {
             return Err(CoreError::Validation(format!(
@@ -1799,6 +1828,15 @@ impl ShopLedger {
         self.conn.execute(
             "UPDATE printers SET name = ?2 WHERE id = ?1",
             params![printer_id, name.trim()],
+        )?;
+        self.snapshot()
+    }
+
+    /// Sets the printer's model. A blank value is stored as blank (no built-in default).
+    pub fn set_printer_model(&mut self, printer_id: &str, model: &str) -> CoreResult<ShopSnapshot> {
+        self.conn.execute(
+            "UPDATE printers SET model = ?2 WHERE id = ?1",
+            params![printer_id, model.trim()],
         )?;
         self.snapshot()
     }
@@ -2188,7 +2226,7 @@ impl ShopLedger {
         let dry_spools =
             feeders::load_dry_box_spools(&self.conn, None, Some(filament_map), "#888888")?;
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm FROM printers ORDER BY id",
+            "SELECT id, name, model, nozzle_mm, status, utilization_pct, bed_x_mm, bed_y_mm, bed_z_mm FROM printers ORDER BY id",
         )?;
         let printers = stmt
             .query_map([], |r| {
@@ -2228,6 +2266,7 @@ impl ShopLedger {
                     utilization_pct: r.get(5)?,
                     bed_x_mm: r.get(6)?,
                     bed_y_mm: r.get(7)?,
+                    bed_z_mm: r.get(8)?,
                     feeders,
                 })
             })?
@@ -4223,7 +4262,7 @@ mod tests {
         let pid = ledger.snapshot().unwrap().printers[0].id.clone();
         assert_eq!(ledger.printer_bed_mm(&pid).unwrap(), (None, None));
         ledger
-            .set_printer_bed_size(&pid, Some(256.0), Some(240.0))
+            .set_printer_bed_size(&pid, Some(256.0), Some(240.0), None)
             .unwrap();
         assert_eq!(
             ledger.printer_bed_mm(&pid).unwrap(),
@@ -4323,20 +4362,20 @@ mod tests {
             (None, None)
         );
         let snap = ledger
-            .set_printer_bed_size(&pid, Some(256.0), Some(256.0))
+            .set_printer_bed_size(&pid, Some(256.0), Some(256.0), None)
             .unwrap();
         let p = snap.printers.iter().find(|p| p.id == pid).unwrap();
         assert_eq!((p.bed_x_mm, p.bed_y_mm), (Some(256.0), Some(256.0)));
         assert!(ledger
-            .set_printer_bed_size(&pid, Some(256.0), None)
+            .set_printer_bed_size(&pid, Some(256.0), None, None)
             .is_err());
         assert!(ledger
-            .set_printer_bed_size(&pid, Some(5.0), Some(256.0))
+            .set_printer_bed_size(&pid, Some(5.0), Some(256.0), None)
             .is_err());
         assert!(ledger
-            .set_printer_bed_size("prn-nope", Some(256.0), Some(256.0))
+            .set_printer_bed_size("prn-nope", Some(256.0), Some(256.0), None)
             .is_err());
-        let snap = ledger.set_printer_bed_size(&pid, None, None).unwrap();
+        let snap = ledger.set_printer_bed_size(&pid, None, None, None).unwrap();
         assert_eq!(
             snap.printers.iter().find(|p| p.id == pid).unwrap().bed_x_mm,
             None
@@ -4351,6 +4390,175 @@ mod tests {
             })
             .unwrap();
         assert_eq!(x, None);
+        let z: Option<f64> = conn
+            .query_row("SELECT bed_z_mm FROM printers WHERE id = 'p1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(z, None);
+    }
+
+    #[test]
+    fn printer_build_height_is_optional_and_upgrades() {
+        // An older database that already has width and depth, but no height column.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE printers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                model TEXT NOT NULL,
+                nozzle_mm REAL NOT NULL,
+                status TEXT NOT NULL,
+                utilization_pct REAL NOT NULL DEFAULT 0.0,
+                bed_x_mm REAL,
+                bed_y_mm REAL
+            );
+             INSERT INTO printers VALUES ('p1', 'A', 'M', 0.4, 'Idle', 0, 256.0, 240.0);",
+        )
+        .unwrap();
+        seed::init_schema(&conn).unwrap();
+        seed::init_schema(&conn).unwrap(); // idempotent
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(printers)")
+            .unwrap()
+            .query_map([], |r| r.get(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(cols.iter().any(|c| c == "bed_z_mm"), "{cols:?}");
+        let ledger = ShopLedger {
+            conn,
+            db_path: None,
+        };
+        let snap = ledger.snapshot().unwrap();
+        let p = snap.printers.iter().find(|p| p.id == "p1").unwrap();
+        assert_eq!(
+            (p.bed_x_mm, p.bed_y_mm, p.bed_z_mm),
+            (Some(256.0), Some(240.0), None)
+        );
+
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let pid = ledger.snapshot().unwrap().printers[0].id.clone();
+        assert_eq!(
+            ledger
+                .snapshot()
+                .unwrap()
+                .printers
+                .iter()
+                .find(|p| p.id == pid)
+                .unwrap()
+                .bed_z_mm,
+            None
+        );
+        let snap = ledger
+            .set_printer_bed_size(&pid, Some(256.0), Some(256.0), Some(256.0))
+            .unwrap();
+        let p = snap.printers.iter().find(|p| p.id == pid).unwrap();
+        assert_eq!(
+            (p.bed_x_mm, p.bed_y_mm, p.bed_z_mm),
+            (Some(256.0), Some(256.0), Some(256.0))
+        );
+        // Plate-building still reads only width and depth.
+        assert_eq!(
+            ledger.printer_bed_mm(&pid).unwrap(),
+            (Some(256.0), Some(256.0))
+        );
+        assert!(ledger
+            .set_printer_bed_size(&pid, Some(256.0), Some(256.0), Some(5.0))
+            .is_err());
+        let snap = ledger
+            .set_printer_bed_size(&pid, Some(256.0), Some(256.0), None)
+            .unwrap();
+        assert_eq!(
+            snap.printers.iter().find(|p| p.id == pid).unwrap().bed_z_mm,
+            None
+        );
+        assert_eq!(
+            (
+                snap.printers.iter().find(|p| p.id == pid).unwrap().bed_x_mm,
+                snap.printers.iter().find(|p| p.id == pid).unwrap().bed_y_mm
+            ),
+            (Some(256.0), Some(256.0))
+        );
+    }
+
+    #[test]
+    fn add_printer_uses_a_neutral_name_and_blank_model() {
+        let mut ledger = ShopLedger::open_in_memory().unwrap();
+        let before = ledger.snapshot().unwrap();
+        let existing = before.printers.len();
+        let demo = before
+            .printers
+            .iter()
+            .find(|p| p.name == "Printer 1")
+            .expect("seeded demo printer");
+        assert_eq!(demo.model, "Demo Printer");
+
+        let snap = ledger
+            .add_printer("  ".into(), "  ".into(), 0.4, vec![])
+            .unwrap();
+        let added = snap
+            .printers
+            .iter()
+            .find(|p| p.name == format!("Printer {}", existing + 1))
+            .expect("fallback-named printer");
+        assert_eq!(added.model, "");
+        assert_eq!(
+            (added.bed_x_mm, added.bed_y_mm, added.bed_z_mm),
+            (None, None, None)
+        );
+
+        let snap = ledger
+            .add_printer_with_bed(
+                "  Shop 1  ".into(),
+                "  Custom  ".into(),
+                0.4,
+                vec![],
+                Some(256.0),
+                Some(256.0),
+                Some(256.0),
+            )
+            .unwrap();
+        let added = snap
+            .printers
+            .iter()
+            .find(|p| p.name == "Shop 1")
+            .expect("named printer");
+        assert_eq!(added.model, "Custom");
+        assert_eq!(
+            (added.bed_x_mm, added.bed_y_mm, added.bed_z_mm),
+            (Some(256.0), Some(256.0), Some(256.0))
+        );
+
+        // Existing printers keep the name and model they already had.
+        let still = snap
+            .printers
+            .iter()
+            .find(|p| p.id == demo.id)
+            .expect("original printer");
+        assert_eq!(still.name, "Printer 1");
+        assert_eq!(still.model, "Demo Printer");
+
+        let snap = ledger
+            .set_printer_model(&added.id, "  Shop Model  ")
+            .unwrap();
+        assert_eq!(
+            snap.printers
+                .iter()
+                .find(|p| p.id == added.id)
+                .unwrap()
+                .model,
+            "Shop Model"
+        );
+        let snap = ledger.set_printer_model(&added.id, "  ").unwrap();
+        assert_eq!(
+            snap.printers
+                .iter()
+                .find(|p| p.id == added.id)
+                .unwrap()
+                .model,
+            ""
+        );
     }
 
     #[test]
@@ -4657,12 +4865,16 @@ mod tests {
                 None,
             )
             .unwrap();
-        ledger.rename_filament_brand("Overture", "  overture ").unwrap();
+        ledger
+            .rename_filament_brand("Overture", "  overture ")
+            .unwrap();
         let snap = ledger.snapshot().unwrap();
         let c = snap.filaments.iter().find(|f| f.name == "C").unwrap();
         // Only this brand existed, so the trimmed spelling the user typed is kept.
         assert_eq!(c.brand, "overture");
-        ledger.rename_filament_brand("overture", "POLYMAKER").unwrap();
+        ledger
+            .rename_filament_brand("overture", "POLYMAKER")
+            .unwrap();
         let snap = ledger.snapshot().unwrap();
         let c = snap.filaments.iter().find(|f| f.name == "C").unwrap();
         assert_eq!(c.brand, "Polymaker");
