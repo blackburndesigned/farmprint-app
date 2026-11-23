@@ -1594,12 +1594,12 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
             let brand = args
                 .get("brand")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Bambu Lab")
+                .unwrap_or("")
                 .to_string();
             let material = args
                 .get("material")
                 .and_then(|v| v.as_str())
-                .unwrap_or("PETG Basic")
+                .unwrap_or("")
                 .to_string();
             let hex = args
                 .get("hex")
@@ -1614,9 +1614,21 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .get("grams_remaining")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(1000.0);
+            let vendor = args
+                .get("vendor")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
             let snap = ledger
-                .add_filament_swatch(name, brand, material, hex, cost_per_kg, grams_remaining)
+                .add_filament_swatch_with_vendor(
+                    name,
+                    brand,
+                    material,
+                    hex,
+                    cost_per_kg,
+                    grams_remaining,
+                    vendor,
+                )
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
@@ -1640,6 +1652,9 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .and_then(|v| v.as_str().map(|s| s.to_string()));
             let cost_per_kg = args.get("cost_per_kg").and_then(|v| v.as_f64());
             let grams_remaining = args.get("grams_remaining").and_then(|v| v.as_f64());
+            let vendor = args
+                .get("vendor")
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
             let snap = ledger
                 .update_filament_swatch(
@@ -1650,6 +1665,7 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                     hex,
                     cost_per_kg,
                     grams_remaining,
+                    vendor,
                 )
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
@@ -1663,13 +1679,6 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
             let snap = ledger
                 .delete_filament_swatch(filament_id)
-                .map_err(|e| e.to_string())?;
-            serde_json::to_value(snap).map_err(|e| e.to_string())
-        }
-        "cleanup_filament_spools" => {
-            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
-            let snap = ledger
-                .cleanup_filament_spools()
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }

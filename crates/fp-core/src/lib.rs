@@ -1862,6 +1862,14 @@ impl ShopLedger {
         self.snapshot()
     }
 
+    fn existing_filament_brands(&self, exclude_id: Option<&str>) -> CoreResult<Vec<String>> {
+        existing_filament_column(&self.conn, "brand", exclude_id, None)
+    }
+
+    fn existing_filament_vendors(&self, exclude_id: Option<&str>) -> CoreResult<Vec<String>> {
+        existing_filament_column(&self.conn, "vendor", exclude_id, None)
+    }
+
     pub fn add_filament_swatch(
         &mut self,
         name: String,
@@ -1871,23 +1879,47 @@ impl ShopLedger {
         cost_per_kg: f64,
         grams_remaining: f64,
     ) -> CoreResult<ShopSnapshot> {
+        self.add_filament_swatch_with_vendor(
+            name,
+            brand,
+            material,
+            hex,
+            cost_per_kg,
+            grams_remaining,
+            None,
+        )
+    }
+
+    pub fn add_filament_swatch_with_vendor(
+        &mut self,
+        name: String,
+        brand: String,
+        material: String,
+        hex: String,
+        cost_per_kg: f64,
+        grams_remaining: f64,
+        vendor: Option<String>,
+    ) -> CoreResult<ShopSnapshot> {
         let id = format!("color-{}", Uuid::new_v4().to_string()[..10].to_uppercase());
         let clean_hex = if hex.trim().starts_with('#') {
             hex.trim().to_uppercase()
         } else {
             format!("#{}", hex.trim().to_uppercase())
         };
+        let brand = canonical_label(&brand, &self.existing_filament_brands(None)?);
+        let vendor = store_vendor(vendor, &self.existing_filament_vendors(None)?);
         self.conn.execute(
-            "INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining, vendor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id,
                 name.trim(),
-                brand.trim(),
+                brand,
                 material.trim(),
                 clean_hex,
                 cost_per_kg,
-                grams_remaining
+                grams_remaining,
+                vendor
             ],
         )?;
         self.snapshot()
@@ -1949,15 +1981,6 @@ impl ShopLedger {
         )?;
         tx.execute("DELETE FROM filaments WHERE id = ?1", params![filament_id])?;
         tx.commit()?;
-        self.snapshot()
-    }
-
-    pub fn cleanup_filament_spools(&mut self) -> CoreResult<ShopSnapshot> {
-        // One spelling everywhere (matches the filament library's normalizeBrandName).
-        self.conn.execute(
-            "UPDATE filaments SET brand = 'Bambu Lab' WHERE LOWER(TRIM(brand)) IN ('bambu lab', 'bambu labs', 'bambulab', 'bambulabs', 'bambu')",
-            [],
-        )?;
         self.snapshot()
     }
 
@@ -2045,7 +2068,7 @@ impl ShopLedger {
 
     fn load_filaments(&self) -> CoreResult<Vec<FilamentSwatch>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, brand, material, hex, cost_per_kg, grams_remaining FROM filaments ORDER BY name",
+            "SELECT id, name, brand, material, hex, cost_per_kg, grams_remaining, vendor FROM filaments ORDER BY name",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -2057,6 +2080,7 @@ impl ShopLedger {
                     hex: r.get(4)?,
                     cost_per_kg: r.get(5)?,
                     grams_remaining: r.get(6)?,
+                    vendor: r.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -2988,6 +3012,7 @@ impl ShopLedger {
         hex: Option<String>,
         cost_per_kg: Option<f64>,
         grams_remaining: Option<f64>,
+        vendor: Option<String>,
     ) -> CoreResult<ShopSnapshot> {
         if let Some(v) = name {
             self.conn.execute(
@@ -2996,9 +3021,10 @@ impl ShopLedger {
             )?;
         }
         if let Some(v) = brand {
+            let brand = canonical_label(&v, &self.existing_filament_brands(Some(filament_id))?);
             self.conn.execute(
                 "UPDATE filaments SET brand = ?1 WHERE id = ?2",
-                params![v, filament_id],
+                params![brand, filament_id],
             )?;
         }
         if let Some(v) = material {
@@ -3023,6 +3049,13 @@ impl ShopLedger {
             self.conn.execute(
                 "UPDATE filaments SET grams_remaining = ?1 WHERE id = ?2",
                 params![v, filament_id],
+            )?;
+        }
+        if let Some(v) = vendor {
+            let vendor = store_vendor(Some(v), &self.existing_filament_vendors(Some(filament_id))?);
+            self.conn.execute(
+                "UPDATE filaments SET vendor = ?1 WHERE id = ?2",
+                params![vendor, filament_id],
             )?;
         }
         self.snapshot()
@@ -3088,13 +3121,16 @@ impl ShopLedger {
         old_brand: &str,
         new_brand: &str,
     ) -> CoreResult<ShopSnapshot> {
-        let trimmed = new_brand.trim();
-        if !trimmed.is_empty() {
-            self.conn.execute(
-                "UPDATE filaments SET brand = ?1 WHERE brand = ?2",
-                params![trimmed, old_brand],
-            )?;
+        // Empty new name leaves the existing brand alone (does not clear it).
+        if collapse_whitespace(new_brand).is_empty() {
+            return self.snapshot();
         }
+        let others = existing_filament_column(&self.conn, "brand", None, Some(old_brand))?;
+        let brand = canonical_label(new_brand, &others);
+        self.conn.execute(
+            "UPDATE filaments SET brand = ?1 WHERE brand = ?2",
+            params![brand, old_brand],
+        )?;
         self.snapshot()
     }
 
@@ -3115,6 +3151,87 @@ impl ShopLedger {
     }
 }
 
+/// Trim and collapse inner whitespace. Blank stays blank.
+pub(crate) fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Case-insensitive key that also ignores spaces, used to group brand/vendor spellings.
+pub(crate) fn label_match_key(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Reuse the most-used existing spelling that matches `input` (ignoring case and
+/// spaces). Ties go to the alphabetically first spelling. No match: the trimmed
+/// input. Blank input stays blank and is never rewritten to a real name.
+pub(crate) fn canonical_label(input: &str, existing: &[String]) -> String {
+    let trimmed = collapse_whitespace(input);
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let key = label_match_key(&trimmed);
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for e in existing {
+        if !collapse_whitespace(e).is_empty() && label_match_key(e) == key {
+            *counts.entry(e.as_str()).or_insert(0) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by(|(a, ca), (b, cb)| ca.cmp(cb).then_with(|| b.cmp(a)))
+        .map(|(spelling, _)| spelling.to_string())
+        .unwrap_or(trimmed)
+}
+
+fn store_vendor(vendor: Option<String>, existing: &[String]) -> Option<String> {
+    let raw = vendor.unwrap_or_default();
+    let value = canonical_label(&raw, existing);
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// `column` is only ever `"brand"` or `"vendor"`.
+fn existing_filament_column(
+    conn: &Connection,
+    column: &str,
+    exclude_id: Option<&str>,
+    exclude_exact: Option<&str>,
+) -> CoreResult<Vec<String>> {
+    let sql = match (column, exclude_id.is_some(), exclude_exact.is_some()) {
+        ("brand", false, false) => "SELECT brand FROM filaments",
+        ("brand", true, false) => "SELECT brand FROM filaments WHERE id != ?1",
+        ("brand", false, true) => "SELECT brand FROM filaments WHERE brand != ?1",
+        ("vendor", false, false) => "SELECT vendor FROM filaments WHERE vendor IS NOT NULL",
+        ("vendor", true, false) => {
+            "SELECT vendor FROM filaments WHERE vendor IS NOT NULL AND id != ?1"
+        }
+        ("vendor", false, true) => {
+            "SELECT vendor FROM filaments WHERE vendor IS NOT NULL AND vendor != ?1"
+        }
+        _ => {
+            return Err(CoreError::Validation(
+                "internal: unexpected filament label query".into(),
+            ))
+        }
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let bind = exclude_id.or(exclude_exact);
+    let rows = if let Some(v) = bind {
+        stmt.query_map(params![v], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        stmt.query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3123,10 +3240,10 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         seed::init_schema(&conn).unwrap();
         conn.execute_batch(
-            "INSERT INTO filaments VALUES ('fil-a', 'Teal', 'AcmeFil', 'PLA', '#00AAAA', 20.0, 900.0);
-             INSERT INTO filaments VALUES ('fil-b', ' teal ', 'acmefil', 'pla', '#00aaaa', 20.0, 500.0);
-             INSERT INTO filaments VALUES ('fil-c', 'Teal', 'AcmeFil', 'PETG', '#00AAAA', 20.0, 100.0);
-             INSERT INTO filaments VALUES ('fil-d', 'Teal', 'AcmeFil', 'PLA', '#00ABAB', 20.0, 100.0);
+            "INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining) VALUES ('fil-a', 'Teal', 'AcmeFil', 'PLA', '#00AAAA', 20.0, 900.0);
+             INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining) VALUES ('fil-b', ' teal ', 'acmefil', 'pla', '#00aaaa', 20.0, 500.0);
+             INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining) VALUES ('fil-c', 'Teal', 'AcmeFil', 'PETG', '#00AAAA', 20.0, 100.0);
+             INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining) VALUES ('fil-d', 'Teal', 'AcmeFil', 'PLA', '#00ABAB', 20.0, 100.0);
              INSERT INTO overstock VALUES ('ov-a', 'prod-x', 'part-x', 'fil-a', 3);
              INSERT INTO overstock VALUES ('ov-b', 'prod-x', 'part-x', 'fil-b', 2);
              INSERT INTO overstock VALUES ('ov-b2', 'prod-x', 'part-y', 'fil-b', 4);",
@@ -4327,5 +4444,228 @@ mod tests {
         assert!(n2 > 0);
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::remove_dir_all(&d2);
+    }
+
+    fn empty_filament_ledger() -> ShopLedger {
+        let conn = Connection::open_in_memory().unwrap();
+        seed::init_schema(&conn).unwrap();
+        ShopLedger {
+            conn,
+            db_path: None,
+        }
+    }
+
+    #[test]
+    fn canonical_label_uses_majority_spelling_and_leaves_blanks_and_others() {
+        assert_eq!(canonical_label("  polymaker  ", &[]), "polymaker");
+        assert_eq!(
+            canonical_label(
+                "POLYMAKER",
+                &["Polymaker ".into(), "Polymaker".into(), "Polymaker".into()]
+            ),
+            "Polymaker"
+        );
+        // Tie: alphabetically first existing spelling ("PolyMaker" < "Polymaker").
+        assert_eq!(
+            canonical_label("polymaker", &["Polymaker".into(), "PolyMaker".into()]),
+            "PolyMaker"
+        );
+        assert_eq!(canonical_label("   ", &["Polymaker".into()]), "");
+        assert_eq!(canonical_label("", &[]), "");
+        // Different brands are not rewritten.
+        assert_eq!(
+            canonical_label("Overture", &["Polymaker".into(), "eSun".into()]),
+            "Overture"
+        );
+        // Spaces inside the name are ignored when matching.
+        assert_eq!(
+            canonical_label("Poly Maker", &["Polymaker".into()]),
+            "Polymaker"
+        );
+    }
+
+    #[test]
+    fn add_filament_swatch_reuses_existing_brand_spelling_and_keeps_blank() {
+        let mut ledger = empty_filament_ledger();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "Black".into(),
+                "Polymaker".into(),
+                "PLA".into(),
+                "#111111".into(),
+                20.0,
+                1000.0,
+                Some("  amazon  ".into()),
+            )
+            .unwrap();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "White".into(),
+                "  polymaker ".into(),
+                "PLA".into(),
+                "#EEEEEE".into(),
+                20.0,
+                800.0,
+                Some("AMAZON".into()),
+            )
+            .unwrap();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "Clear".into(),
+                "POLYMAKER".into(),
+                "PETG".into(),
+                "#FFFFFF".into(),
+                22.0,
+                500.0,
+                None,
+            )
+            .unwrap();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "Mystery".into(),
+                "   ".into(),
+                "PLA".into(),
+                "#000000".into(),
+                10.0,
+                100.0,
+                Some("  ".into()),
+            )
+            .unwrap();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "Other".into(),
+                "eSun".into(),
+                "PLA".into(),
+                "#00AA00".into(),
+                18.0,
+                900.0,
+                Some("Direct".into()),
+            )
+            .unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let by_name = |n: &str| snap.filaments.iter().find(|f| f.name == n).unwrap();
+        assert_eq!(by_name("Black").brand, "Polymaker");
+        assert_eq!(by_name("White").brand, "Polymaker");
+        assert_eq!(by_name("Clear").brand, "Polymaker");
+        assert_eq!(by_name("Mystery").brand, "");
+        assert_eq!(by_name("Other").brand, "eSun");
+        assert_eq!(by_name("Black").vendor.as_deref(), Some("amazon"));
+        assert_eq!(by_name("White").vendor.as_deref(), Some("amazon"));
+        assert_eq!(by_name("Clear").vendor, None);
+        assert_eq!(by_name("Mystery").vendor, None);
+        assert_eq!(by_name("Other").vendor.as_deref(), Some("Direct"));
+    }
+
+    #[test]
+    fn update_and_rename_filament_brand_reuse_existing_spelling() {
+        let mut ledger = empty_filament_ledger();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "A".into(),
+                "Polymaker".into(),
+                "PLA".into(),
+                "#111111".into(),
+                20.0,
+                1000.0,
+                Some("Shop".into()),
+            )
+            .unwrap();
+        ledger
+            .add_filament_swatch_with_vendor(
+                "B".into(),
+                "eSun".into(),
+                "PLA".into(),
+                "#00AA00".into(),
+                18.0,
+                900.0,
+                None,
+            )
+            .unwrap();
+        let id_b = ledger
+            .snapshot()
+            .unwrap()
+            .filaments
+            .iter()
+            .find(|f| f.name == "B")
+            .unwrap()
+            .id
+            .clone();
+        ledger
+            .update_filament_swatch(
+                &id_b,
+                None,
+                Some("  POLYMAKER ".into()),
+                None,
+                None,
+                None,
+                None,
+                Some("  shop ".into()),
+            )
+            .unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let b = snap.filaments.iter().find(|f| f.name == "B").unwrap();
+        assert_eq!(b.brand, "Polymaker");
+        assert_eq!(b.vendor.as_deref(), Some("Shop"));
+
+        ledger
+            .add_filament_swatch_with_vendor(
+                "C".into(),
+                "Overture".into(),
+                "PETG".into(),
+                "#123456".into(),
+                20.0,
+                100.0,
+                None,
+            )
+            .unwrap();
+        ledger.rename_filament_brand("Overture", "  overture ").unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let c = snap.filaments.iter().find(|f| f.name == "C").unwrap();
+        // Only this brand existed, so the trimmed spelling the user typed is kept.
+        assert_eq!(c.brand, "overture");
+        ledger.rename_filament_brand("overture", "POLYMAKER").unwrap();
+        let snap = ledger.snapshot().unwrap();
+        let c = snap.filaments.iter().find(|f| f.name == "C").unwrap();
+        assert_eq!(c.brand, "Polymaker");
+        // Clearing a brand on rename is a no-op.
+        ledger.rename_filament_brand("Polymaker", "   ").unwrap();
+        let snap = ledger.snapshot().unwrap();
+        assert!(snap.filaments.iter().all(|f| f.brand == "Polymaker"));
+    }
+
+    #[test]
+    fn filament_vendor_column_migrates_on_old_db_and_reads_as_none() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE filaments (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                brand TEXT NOT NULL,
+                material TEXT NOT NULL,
+                hex TEXT NOT NULL,
+                cost_per_kg REAL NOT NULL,
+                grams_remaining REAL NOT NULL
+            );
+             INSERT INTO filaments VALUES ('fil-old', 'Teal', 'Acme', 'PLA', '#00AAAA', 20.0, 900.0);",
+        )
+        .unwrap();
+        seed::init_schema(&conn).unwrap();
+        seed::init_schema(&conn).unwrap(); // idempotent
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(filaments)")
+            .unwrap()
+            .query_map([], |r| r.get(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(cols.iter().any(|c| c == "vendor"), "{cols:?}");
+        let ledger = ShopLedger {
+            conn,
+            db_path: None,
+        };
+        let snap = ledger.snapshot().unwrap();
+        let f = snap.filaments.iter().find(|f| f.id == "fil-old").unwrap();
+        assert_eq!(f.brand, "Acme");
+        assert_eq!(f.vendor, None);
     }
 }

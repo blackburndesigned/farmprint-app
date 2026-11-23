@@ -15,6 +15,8 @@ export interface FilamentSwatch {
   hex: string;
   cost_per_kg: number;
   grams_remaining: number;
+  /** Where the spool was bought. Missing/null means unspecified. */
+  vendor?: string | null;
 }
 
 export interface CatalogPart {

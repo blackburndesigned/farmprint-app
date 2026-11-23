@@ -5,24 +5,21 @@ import { FilamentSwatch, ShopSnapshot } from "../types";
 import { confirmDeleteFilament, notifyError } from "../uiFeedback";
 import { X } from "lucide-react";
 import { Icon } from "../icons";
+import { displayBrand, displayVendor, suggestionValues } from "../filamentLabels";
 
-function normalizeBrandName(brand?: string | null): string {
-  const raw = (brand || "").trim();
-  if (!raw) return "Bambu Lab";
-  const lower = raw.toLowerCase();
-  if (lower === "bambu labs" || lower === "bambulab" || lower === "bambulabs") {
-    return "Bambu Lab";
-  }
-  return raw;
+function vendorKey(vendor?: string | null): string {
+  return (vendor || "").trim();
 }
 
-function vendorForBrand(brand: string): string {
-  const lower = brand.toLowerCase();
-  if (lower.includes("bambu")) return "Bambu Store";
-  if (lower.includes("polymaker") || lower.includes("overture") || lower.includes("esun") || lower.includes("sunlu")) {
-    return "Amazon";
-  }
-  return "Direct";
+function brandKey(brand?: string | null): string {
+  return (brand || "").trim();
+}
+
+function sortKeys(a: string, b: string): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return a.localeCompare(b);
 }
 
 export const FilamentLibrarySheet: React.FC<{
@@ -33,34 +30,39 @@ export const FilamentLibrarySheet: React.FC<{
   const [selectedVendor, setSelectedVendor] = useState<string>("All");
   const [selectedBrand, setSelectedBrand] = useState<string>("All");
   const [selectedMaterial, setSelectedMaterial] = useState<string>("All");
-  const [customVendors] = useState<string[]>(["Bambu Store", "Amazon", "Direct"]);
   const [newName, setNewName] = useState("");
-  const [newBrand, setNewBrand] = useState("Bambu Lab");
-  const [newMaterial, setNewMaterial] = useState("PETG Basic");
+  const [newBrand, setNewBrand] = useState("");
+  const [newVendor, setNewVendor] = useState("");
+  const [newMaterial, setNewMaterial] = useState("");
   const [newHex, setNewHex] = useState("#FF8D28");
   const [newCost, setNewCost] = useState("22.99");
   const [newGrams, setNewGrams] = useState("1000");
 
   const normalizedFilaments = useMemo(
     () =>
-      snapshot.filaments.map((f) => {
-        const brand = normalizeBrandName(f.brand);
-        const vendor = vendorForBrand(brand);
-        return {
-          ...f,
-          brand,
-          vendor,
-          material: (f.material || "PETG Basic").trim(),
-        };
-      }),
+      snapshot.filaments.map((f) => ({
+        ...f,
+        brand: brandKey(f.brand),
+        vendor: vendorKey(f.vendor),
+        material: (f.material || "").trim(),
+      })),
+    [snapshot.filaments]
+  );
+
+  const brandSuggestions = useMemo(
+    () => suggestionValues(snapshot.filaments.map((f) => f.brand)).sort((a, b) => a.localeCompare(b)),
+    [snapshot.filaments]
+  );
+  const vendorSuggestions = useMemo(
+    () => suggestionValues(snapshot.filaments.map((f) => f.vendor)).sort((a, b) => a.localeCompare(b)),
     [snapshot.filaments]
   );
 
   const vendors = useMemo(() => {
-    const set = new Set<string>(customVendors);
+    const set = new Set<string>();
     for (const f of normalizedFilaments) set.add(f.vendor);
-    return Array.from(set);
-  }, [normalizedFilaments, customVendors]);
+    return Array.from(set).sort(sortKeys);
+  }, [normalizedFilaments]);
 
   const vendorFiltered = useMemo(
     () =>
@@ -71,7 +73,7 @@ export const FilamentLibrarySheet: React.FC<{
   );
 
   const brands = useMemo(
-    () => Array.from(new Set(vendorFiltered.map((f) => f.brand))),
+    () => Array.from(new Set(vendorFiltered.map((f) => f.brand))).sort(sortKeys),
     [vendorFiltered]
   );
 
@@ -101,11 +103,12 @@ export const FilamentLibrarySheet: React.FC<{
     try {
       const next = await invoke<ShopSnapshot>("add_filament_swatch", {
         name: newName.trim(),
-        brand: normalizeBrandName(newBrand),
-        material: newMaterial.trim() || "PETG Basic",
+        brand: newBrand,
+        vendor: newVendor,
+        material: newMaterial.trim(),
         hex: newHex.trim() || "#FF8D28",
-        costPerKg: parseFloat(newCost) || 22.99,
-        gramsRemaining: parseFloat(newGrams) || 1000,
+        cost_per_kg: parseFloat(newCost) || 22.99,
+        grams_remaining: parseFloat(newGrams) || 1000,
       });
       onSnapshot(next);
       setNewName("");
@@ -124,15 +127,6 @@ export const FilamentLibrarySheet: React.FC<{
       onSnapshot(next);
     } catch (e) {
       notifyError(`${fil.name} was not deleted`, e);
-    }
-  };
-
-  const handleCleanup = async () => {
-    try {
-      const next = await invoke<ShopSnapshot>("cleanup_filament_spools", {});
-      onSnapshot(next);
-    } catch (e) {
-      notifyError("Filament cleanup failed", e);
     }
   };
 
@@ -160,9 +154,6 @@ export const FilamentLibrarySheet: React.FC<{
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="fp-btn" onClick={handleCleanup}>
-              Normalize Brands
-            </button>
             <button type="button" className="fp-btn" onClick={onClose}>
               Done
             </button>
@@ -221,7 +212,7 @@ export const FilamentLibrarySheet: React.FC<{
                     setSelectedMaterial("All");
                   }}
                 >
-                  <span>{v}</span>
+                  <span>{displayVendor(v)}</span>
                   <span>{count}</span>
                 </button>
               );
@@ -267,7 +258,7 @@ export const FilamentLibrarySheet: React.FC<{
                   setSelectedMaterial("All");
                 }}
               >
-                <span>{b}</span>
+                <span>{displayBrand(b)}</span>
                 <span>{vendorFiltered.filter((f) => f.brand === b).length}</span>
               </button>
             ))}
@@ -306,7 +297,7 @@ export const FilamentLibrarySheet: React.FC<{
                 style={{ justifyContent: "space-between" }}
                 onClick={() => setSelectedMaterial(m)}
               >
-                <span>{m}</span>
+                <span>{m || "No material"}</span>
                 <span>{brandFiltered.filter((f) => f.material === m).length}</span>
               </button>
             ))}
@@ -364,7 +355,9 @@ export const FilamentLibrarySheet: React.FC<{
                         {sw.name}
                       </div>
                       <div style={{ fontSize: 10.5, color: "rgba(235,235,245,0.55)" }}>
-                        {sw.brand} • {sw.material} • {Math.round(sw.grams_remaining)}g
+                        {displayBrand(sw.brand)}
+                        {sw.material ? ` • ${sw.material}` : ""}
+                        {` • ${Math.round(sw.grams_remaining)}g`}
                       </div>
                     </div>
                   </div>
@@ -420,11 +413,30 @@ export const FilamentLibrarySheet: React.FC<{
           />
           <input
             type="text"
+            list="fp-filament-brand-choices"
             placeholder="Brand"
             value={newBrand}
             onChange={(e) => setNewBrand(e.target.value)}
             style={{ padding: "6px 10px", borderRadius: 8, width: 130 }}
           />
+          <datalist id="fp-filament-brand-choices">
+            {brandSuggestions.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
+          <input
+            type="text"
+            list="fp-filament-vendor-choices"
+            placeholder="Vendor"
+            value={newVendor}
+            onChange={(e) => setNewVendor(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 8, width: 130 }}
+          />
+          <datalist id="fp-filament-vendor-choices">
+            {vendorSuggestions.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
           <input
             type="text"
             placeholder="Material"
