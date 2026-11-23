@@ -505,6 +505,7 @@ mod tests {
             hex: h.into(),
             cost_per_kg: 20.0,
             grams_remaining: 1000.0,
+            vendor: None,
         };
         let p = Product {
             id: "prod-a".into(),

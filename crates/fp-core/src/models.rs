@@ -59,6 +59,10 @@ pub struct FilamentSwatch {
     pub hex: String,
     pub cost_per_kg: f64,
     pub grams_remaining: f64,
+    /// Where the spool was bought. None/NULL means unspecified. Added additively
+    /// (schema version stays 3); older rows and snapshots default to None.
+    #[serde(default)]
+    pub vendor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -45,6 +45,10 @@ pub const FLOW_UNDO_COLUMNS: [(&str, &str); 6] = [
 /// building keeps its 220 mm default). Schema version unchanged (3).
 pub const PRINTER_BED_COLUMNS: [(&str, &str); 2] = [("bed_x_mm", "REAL"), ("bed_y_mm", "REAL")];
 
+/// Filament vendor/source (2026-11-22): nullable, additive. Schema version unchanged (3).
+/// Existing rows stay NULL and show as unspecified in the library.
+pub const FILAMENT_VENDOR_COLUMNS: [(&str, &str); 1] = [("vendor", "TEXT")];
+
 pub fn init_schema(conn: &Connection) -> CoreResult<()> {
     init_tables(conn)?;
     add_missing_columns(conn, "orders", &ORDER_SHIP_COLUMNS)?;
@@ -52,6 +56,7 @@ pub fn init_schema(conn: &Connection) -> CoreResult<()> {
     add_missing_columns(conn, "order_lines", &ORDER_LINE_VIEW_COLUMNS)?;
     add_missing_columns(conn, "flow_events", &FLOW_UNDO_COLUMNS)?;
     add_missing_columns(conn, "printers", &PRINTER_BED_COLUMNS)?;
+    add_missing_columns(conn, "filaments", &FILAMENT_VENDOR_COLUMNS)?;
     // Lookup indexes (additive, schema version unchanged). Safe to run on every open.
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id);
@@ -264,7 +269,7 @@ pub fn seed_if_empty(conn: &Connection) -> CoreResult<()> {
     ];
     for (id, name, brand, mat, hex, cost, rem) in filaments {
         conn.execute(
-            "INSERT INTO filaments VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO filaments (id, name, brand, material, hex, cost_per_kg, grams_remaining) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, name, brand, mat, hex, cost, rem],
         )?;
     }
