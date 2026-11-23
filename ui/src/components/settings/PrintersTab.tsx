@@ -107,7 +107,15 @@ const PrinterEditSheet: React.FC<{
   run: (cmd: string, args: Record<string, unknown>) => Promise<void>;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ printer: p, filaments, accent, modelSuggestions, plate, onAccent, run, onRemove, onClose }) => {
+}> = ({ printer: p, filaments, accent, modelSuggestions, plate, onAccent, run, onRemove, onClose: closeSheet }) => {
+  // Fields here save when focus leaves them. Closing the sheet unmounts the focused field
+  // without a blur, so blur it first: the edit being typed (bed size, clearance, name…)
+  // is saved however the sheet closes (Done, Escape, or a click outside).
+  const onClose = React.useCallback(() => {
+    const el = document.activeElement;
+    if (el instanceof HTMLElement && el !== document.body) el.blur();
+    closeSheet();
+  }, [closeSheet]);
   const [name, setName] = useState(p.name);
   const [model, setModel] = useState(p.model);
   useEffect(() => setName(p.name), [p.name]);
