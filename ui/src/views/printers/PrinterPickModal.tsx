@@ -137,12 +137,12 @@ export const PrinterPickModal: React.FC<{
               onArrange={() => onArrange?.()}
             />
           )}
+          {!mark && blockReason && (
+            <div className="fp-print-block-reason" role="note" style={{ fontSize: 12, color: "var(--danger, #d2403a)", lineHeight: 1.3, textAlign: "right", marginTop: 4 }}>
+              {blockReason}
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-            {!mark && blockReason && (
-              <span className="fp-print-block-reason" role="note" style={{ marginRight: "auto", fontSize: 12, color: "var(--danger, #d2403a)", maxWidth: 230, lineHeight: 1.3 }}>
-                {blockReason}
-              </span>
-            )}
             <button type="button" className="fp-btn fp-btn-sm" onClick={onCancel}>Cancel</button>
             <button
               type="button"
