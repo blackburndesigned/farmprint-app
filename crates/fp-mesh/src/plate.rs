@@ -421,6 +421,20 @@ pub struct Reach {
     pub height_mm: Option<f64>,
     #[serde(default)]
     pub label: String,
+    /// No print area the part's nozzles reach exists: it can't print on this printer.
+    /// Arrange leaves it beside the bed and check flags it; never the whole bed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unreachable: bool,
+}
+
+/// Message for a part no nozzle area fits.
+pub const UNREACHABLE_MESSAGE: &str = "No nozzle area fits this part";
+
+impl Reach {
+    /// The reach of a part no print area fits.
+    pub fn unreachable() -> Self {
+        Reach { rect: [0.0; 4], height_mm: None, label: "No nozzle area".into(), unreachable: true }
+    }
 }
 
 /// One print area as the printer settings give it (origin = front-left corner, bed mm).
@@ -484,7 +498,7 @@ pub fn shared_reach(areas: &[PrintAreaSpec]) -> Option<Reach> {
     }
     let sides: std::collections::BTreeSet<String> = areas.iter().filter_map(|a| a.nozzle_side()).collect();
     let label = if sides.len() >= 2 { "Both nozzles".to_string() } else { "Every area".to_string() };
-    Some(Reach { rect: r, height_mm: h, label })
+    Some(Reach { rect: r, height_mm: h, label, unreachable: false })
 }
 
 /// Where a part printed by `nozzles` may sit. One known nozzle with its own area: that
@@ -513,6 +527,7 @@ pub fn reach_for_nozzles(areas: &[PrintAreaSpec], nozzles: &[Option<String>]) ->
                 rect: a.rect(),
                 height_mm: a.height_mm,
                 label: format!("{} nozzle", capitalize(side)),
+                unreachable: false,
             });
         }
     }
@@ -523,7 +538,7 @@ pub fn reach_for_nozzles(areas: &[PrintAreaSpec], nozzles: &[Option<String>]) ->
 pub fn reach_for_area_name(areas: &[PrintAreaSpec], name: &str) -> Option<Reach> {
     let n = name.trim();
     if let Some(a) = areas.iter().find(|a| a.name.trim().eq_ignore_ascii_case(n)) {
-        return Some(Reach { rect: a.rect(), height_mm: a.height_mm, label: a.name.trim().to_string() });
+        return Some(Reach { rect: a.rect(), height_mm: a.height_mm, label: a.name.trim().to_string(), unreachable: false });
     }
     if n.eq_ignore_ascii_case("shared") || n.eq_ignore_ascii_case("both") {
         return shared_reach(areas);
@@ -564,6 +579,11 @@ impl ArrangeItem {
             Some(r) => [r.rect[0].max(0.0), r.rect[1].max(0.0), r.rect[2].min(full[2]), r.rect[3].min(full[3])],
             None => full,
         }
+    }
+
+    /// True when no print area fits it (see [`Reach::unreachable`]).
+    pub fn is_unreachable(&self) -> bool {
+        self.reach.as_ref().is_some_and(|r| r.unreachable)
     }
 
     /// Build height where it may sit: the lower of the bed's and its area's.
@@ -901,6 +921,11 @@ pub fn arrange(items: &[ArrangeItem], bed: &BedSize, s: &ArrangeSettings) -> Vec
     };
     for (i, it) in items.iter().enumerate() {
         if let Some(p) = it.pinned {
+            if it.is_unreachable() {
+                // It can't print here: keep where it was put, but it holds no room.
+                out[i] = Some(p);
+                continue;
+            }
             ensure(&mut plates, &mut plate_has_pin, p.plate);
             let poly = transform_2d(&simplify_convex(&it.hull, SIMPLIFY_MM), p.rot_deg, p.x, p.y);
             plates[p.plate].push(Placed::new(poly, gap));
@@ -909,7 +934,17 @@ pub fn arrange(items: &[ArrangeItem], bed: &BedSize, s: &ArrangeSettings) -> Vec
         }
     }
     ensure(&mut plates, &mut plate_has_pin, 0);
-    let mut order: Vec<usize> = (0..items.len()).filter(|&i| items[i].pinned.is_none()).collect();
+    // Parts no nozzle area fits are not placed on any plate: they wait beside the bed
+    // (left of it, plate 1) and check flags them.
+    let mut beside = 0.0;
+    for (i, it) in items.iter().enumerate() {
+        if it.pinned.is_none() && it.is_unreachable() {
+            let b = bbox_2d(&it.hull);
+            beside += (b[2] - b[0]) + 10.0;
+            out[i] = Some(Placement { plate: 0, x: -beside + (b[2] - b[0]) / 2.0 - (b[0] + b[2]) / 2.0, y: bed.depth_mm / 2.0 - (b[1] + b[3]) / 2.0, rot_deg: 0.0 });
+        }
+    }
+    let mut order: Vec<usize> = (0..items.len()).filter(|&i| items[i].pinned.is_none() && !items[i].is_unreachable()).collect();
     let rects: Vec<[f64; 4]> = items.iter().map(|it| it.allowed_rect(bed)).collect();
     let rect_area = |r: [f64; 4]| (r[2] - r[0]).max(0.0) * (r[3] - r[1]).max(0.0);
     let any_reach = items.iter().any(|it| it.reach.is_some());
@@ -1042,9 +1077,13 @@ pub struct PlateCheck {
     pub clearance_overlaps: Vec<[usize; 2]>,
     /// Items taller than the printer's build height, or their print area's height.
     pub too_tall: Vec<usize>,
-    /// Items on the bed but outside the print area that can print them.
+    /// Items on the bed but outside the print area that can print them, and every item no
+    /// nozzle area fits (those are also in `unreachable`).
     #[serde(default)]
     pub out_of_area: Vec<usize>,
+    /// Items no print area fits on this printer (they can't be sent).
+    #[serde(default)]
+    pub unreachable: Vec<usize>,
     /// By object: items taller than the height to rod (they print last, back to front).
     pub taller_than_gantry: Vec<usize>,
     /// By object: pairs of items above the height to rod closer front to back (Y) than the
@@ -1069,6 +1108,7 @@ impl PlateCheck {
             && self.collisions.is_empty()
             && self.too_tall.is_empty()
             && self.out_of_area.is_empty()
+            && self.unreachable.is_empty()
             && self.rod_conflicts.is_empty()
             && self.over_lid.is_empty()
     }
@@ -1089,6 +1129,11 @@ pub fn check(items: &[ArrangeItem], placements: &[Placement], bed: &BedSize, s: 
     let eps = 0.01;
     for i in 0..n {
         let b = bbs[i];
+        if items[i].is_unreachable() {
+            c.unreachable.push(i);
+            c.out_of_area.push(i);
+            continue;
+        }
         if b[0] < -eps || b[1] < -eps || b[2] > bed.width_mm + eps || b[3] > bed.depth_mm + eps {
             c.off_plate.push(i);
         } else if items[i].reach.is_some() {
@@ -1109,7 +1154,7 @@ pub fn check(items: &[ArrangeItem], placements: &[Placement], bed: &BedSize, s: 
     }
     for i in 0..n {
         for j in i + 1..n {
-            if placements[i].plate != placements[j].plate {
+            if placements[i].plate != placements[j].plate || items[i].is_unreachable() || items[j].is_unreachable() {
                 continue;
             }
             let d = convex_distance(&polys[i], &polys[j]);
@@ -1908,6 +1953,63 @@ mod tests {
         let items = vec![tall("right"), tall("left")];
         let c = check(&items, &arrange(&items, &dual_bed(), &s), &dual_bed(), &s);
         assert_eq!(c.too_tall, vec![1], "{c:?}");
+    }
+
+    #[test]
+    fn a_part_no_area_fits_is_left_beside_the_bed_and_flagged() {
+        let areas = dual_areas();
+        let s = layer(5.0);
+        let bed = dual_bed();
+        let items = vec![
+            ArrangeItem { reach: Some(Reach::unreachable()), ..item(40.0, 40.0) },
+            ArrangeItem { reach: reach_for_nozzles(&areas, &side("left")), ..item(40.0, 40.0) },
+            ArrangeItem { reach: Some(Reach::unreachable()), ..item(30.0, 30.0) },
+        ];
+        let p = arrange(&items, &bed, &s);
+        // Not put anywhere on the bed: beside it, left of x = 0, not overlapping each other.
+        for i in [0, 2] {
+            let b = bbox_2d(&placed_outline(&items[i], &p[i]));
+            assert!(b[2] <= -9.9, "{i}: {b:?}");
+        }
+        let (b0, b2) = (bbox_2d(&placed_outline(&items[0], &p[0])), bbox_2d(&placed_outline(&items[2], &p[2])));
+        assert!(b2[2] <= b0[0] || b0[2] <= b2[0], "{b0:?} {b2:?}");
+        let c = check(&items, &p, &bed, &s);
+        assert_eq!(c.unreachable, vec![0, 2]);
+        assert_eq!(c.out_of_area, vec![0, 2]);
+        assert!(c.off_plate.is_empty(), "flagged as unreachable, not off the plate");
+        assert!(!c.fits());
+        assert_eq!(c.plates, 1);
+        // Dragged onto the bed it is still flagged, and never collides with anything.
+        let mut q = p.clone();
+        q[0] = q[1];
+        let c = check(&items, &q, &bed, &s);
+        assert_eq!(c.unreachable, vec![0, 2]);
+        assert!(c.collisions.is_empty());
+        // Pinned there, arrange leaves it and packs around nothing.
+        let mut pinned = items.clone();
+        pinned[0].pinned = Some(q[0]);
+        let p2 = arrange(&pinned, &bed, &s);
+        assert_eq!(p2[0], q[0]);
+        assert!(check(&items, &p2, &bed, &s).collisions.is_empty());
+    }
+
+    #[test]
+    fn shared_parts_pack_in_a_computed_overlap() {
+        // No "both" area: the shared part gets the left/right overlap (computed by
+        // fp-core); test data only.
+        let overlap = Reach { rect: [20.0, 5.0, 325.0, 320.0], height_mm: Some(320.0), label: "Overlap".into(), unreachable: false };
+        let areas = dual_areas();
+        let s = layer(5.0);
+        let bed = dual_bed();
+        let items = vec![
+            ArrangeItem { reach: Some(overlap.clone()), ..item(60.0, 60.0) },
+            ArrangeItem { reach: reach_for_nozzles(&areas, &side("left")), ..item(60.0, 60.0) },
+        ];
+        let p = arrange(&items, &bed, &s);
+        let c = check(&items, &p, &bed, &s);
+        assert!(c.fits(), "{c:?}");
+        let b = bbox_2d(&placed_outline(&items[0], &p[0]));
+        assert!(b[0] >= 20.0 - 1e-6 && b[1] >= 5.0 - 1e-6, "{b:?}");
     }
 
     #[test]

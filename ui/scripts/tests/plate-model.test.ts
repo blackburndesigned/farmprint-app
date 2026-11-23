@@ -2,6 +2,7 @@ import {
   angleDelta,
   biggerThanBed,
   clearanceFieldsOf,
+  reachFromPartArea,
   DEFAULT_SETTINGS,
   plateEntryOf,
   convexOverlap,
@@ -22,6 +23,8 @@ import {
   type V2,
 } from "../../src/views/printers/plate/plateModel";
 import { check, done } from "./check";
+import { printAreaForSlots } from "../../src/views/printers/printAreas";
+import type { PrintArea, PrinterFeeder } from "../../src/types";
 import { PLATE_DEFAULT_CLEARANCE_HEIGHT_MM, PLATE_DEFAULT_CLEARANCE_RADIUS_MM } from "../../src/views/printers/extruderClearance";
 
 
@@ -109,6 +112,37 @@ check(!h.canRedo, "a new change clears redo");
   check(areaShading(big, { list: [], shared: null }).partial.length === 0, "no areas: no shading");
   check(fitHeadline({ fits: false, plates: 1, off_plate: [], collisions: [], too_tall: [], out_of_area: ["a"] }).tone === "bad", "out of area is a bad fit");
   check(layoutFor([p("a", 100, right, "Left nozzle"), p("b", 100)], []).parts.map((x) => x.area ?? "-").join() === "Left nozzle,-", "layout carries picked areas only");
+}
+// A part no nozzle area fits, and the computed overlap when there is no "both" area.
+// Test data only.
+{
+  const printer = (areas: PrintArea[]) => ({
+    feeders: [
+      { id: "fl", name: "L", slot_count: 4, is_dry_box: false, first_slot: 1, spools: [], auto: false, nozzle: "left" },
+      { id: "fr", name: "R", slot_count: 4, is_dry_box: false, first_slot: 5, spools: [], auto: false, nozzle: "right" },
+    ] as unknown as PrinterFeeder[],
+    print_areas: areas,
+  });
+  const area = (name: string, nozzle: "left" | "right" | "both", x: number, w: number): PrintArea => ({ id: name, name, nozzle, x_mm: x, y_mm: 0, width_mm: w, depth_mm: 320, height_mm: 320 });
+  const onlyLeft = printer([area("Left nozzle", "left", 0, 325)]);
+  const gone = reachFromPartArea(printAreaForSlots(onlyLeft, [5]));
+  check(!!gone?.unreachable, "right-nozzle part with only a left area is unreachable");
+  check(reachFromPartArea(printAreaForSlots(printer([]), [5])) === null, "no areas: whole bed");
+  check(outOfAreaMessage(gone) === "No nozzle area fits this part", "unreachable message");
+  const areas: PlateAreas = { list: [{ name: "Left nozzle", rect: [0, 0, 325, 320], height_mm: 320, nozzle: "left" }], shared: null };
+  const u = { ...part("u", 100, 100, 10), auto_reach: gone };
+  const inBed = liveProblems([u, part("v", 100, 100, 10)], 0, { width_mm: 325, depth_mm: 320 }, areas);
+  check(inBed.out.has("u") && !inBed.hit.has("u") && !inBed.hit.has("v"), "unreachable is red even inside the bed, and never collides");
+  const beside = liveProblems([{ ...u, placement: { plate: 0, x: -30, y: 100, rot_deg: 0 } }], 0, { width_mm: 325, depth_mm: 320 }, areas);
+  check(beside.out.has("u") && !beside.off.has("u"), "beside the bed it is unreachable, not off-plate");
+  const h = fitHeadline({ fits: false, plates: 1, off_plate: [], collisions: [], too_tall: [], out_of_area: ["u"], unreachable: ["u"] });
+  check(h.tone === "bad" && h.text === "No nozzle area fits this part", "headline names the unreachable part");
+  // No "both" area: shared parts get the left/right overlap, never the whole bed.
+  const lr = printer([area("Left nozzle", "left", 0, 325), area("Right nozzle", "right", 20, 305)]);
+  const ov = reachFromPartArea(printAreaForSlots(lr, [1, 5]));
+  check(!!ov && !ov.unreachable && ov.rect.join() === "20,0,325,320" && ov.label === "Overlap", "mixed part gets the computed overlap");
+  check(reachFromPartArea(printAreaForSlots(lr, []))?.rect.join() === "20,0,325,320", "unknown nozzle gets the overlap too");
+  check(reachFromPartArea(printAreaForSlots(lr, [1]))?.label === "Left nozzle", "one-nozzle part keeps its own area");
 }
 
 // Clearance lives on the printer; printer_plate keeps only spacing/rotate/align/sequence.

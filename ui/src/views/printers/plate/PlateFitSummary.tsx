@@ -82,7 +82,9 @@ export const PlateFitSummary: React.FC<{
     h.tone === "bad"
       ? c.too_tall.length
         ? `Too tall for ${printerName}. Pick another printer, or lay the part on a side in the plate view.`
-        : c.out_of_area?.length && !c.off_plate.length
+        : c.unreachable?.length
+          ? `No print area on ${printerName} is reachable by the nozzles these filaments use. Load them on other feeders, or pick another printer.`
+          : c.out_of_area?.length && !c.off_plate.length
           ? `Bigger than the area its nozzle reaches on ${printerName}. Pick another printer, or turn the part in the plate view.`
           : `Bigger than ${printerName}'s bed. Pick a larger printer, or turn the part in the plate view.`
       : c.plates > 1

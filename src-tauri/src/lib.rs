@@ -647,6 +647,10 @@ fn stage_and_open_plate(
                 plan.bed.height_mm.unwrap_or_default()
             ));
         }
+        if !c.unreachable.is_empty() {
+            let list: Vec<&str> = c.unreachable.iter().filter_map(|&i| units_with_meshes.get(i).map(|u| u.0.part_name.as_str())).collect();
+            return Err(plate_view::unreachable_error(&list));
+        }
         if let Some(&i) = c.out_of_area.first() {
             let r = plan.reaches.get(i).cloned().flatten();
             let (label, w, d) = r

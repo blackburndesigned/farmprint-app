@@ -487,7 +487,7 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
     const ids = new Set(areaTargets.map((p) => p.unit_id));
     commit((s) => ({ ...s, parts: s.parts.map((p) => (ids.has(p.unit_id) ? { ...p, area: v === AUTO_AREA ? undefined : v } : p)) }));
   };
-  const firstOut = parts.find((p) => outOfArea.has(p.unit_id));
+  const firstOut = parts.find((p) => outOfArea.has(p.unit_id) && reachById.get(p.unit_id)?.unreachable) ?? parts.find((p) => outOfArea.has(p.unit_id));
 
   const send = () => {
     if (blocked) return;
@@ -846,6 +846,15 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
                   <Icon icon={CircleAlert} size={16} />
                   <div style={{ flex: 1 }}>
                     <div className="fp-plate-toast-title">{outOfAreaMessage(reachById.get(firstOut.unit_id) ?? null)}</div>
+                    {reachById.get(firstOut.unit_id)?.unreachable ? (
+                      <div>
+                        {firstOut.name} uses filament on nozzles that share no print area on this printer, so it can't be sent. Load its filament on
+                        another feeder, pick an area for it, remove it from the job, or pick another printer.{" "}
+                        <button type="button" className="fp-link-btn" onClick={() => jumpTo([firstOut.unit_id])}>
+                          Jump to
+                        </button>
+                      </div>
+                    ) : (
                     <div>
                       {outOfArea.size === 1 ? `${firstOut.name} is` : `${outOfArea.size} parts are`} outside the area {outOfArea.size === 1 ? "its nozzle" : "their nozzles"} can print. Move{" "}
                       {outOfArea.size === 1 ? "it" : "them"} into the highlighted area, pick another area, or{" "}
@@ -857,6 +866,7 @@ export const PlateView: React.FC<PlateViewProps> = ({ unitIds, printers, printer
                         Jump to
                       </button>
                     </div>
+                    )}
                   </div>
                 </div>
               )}

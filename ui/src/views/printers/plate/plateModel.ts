@@ -3,6 +3,8 @@
 // backend (fp-mesh `plate`), so Print! and the plate view always agree. Plain TS so
 // scripts/tests can run it.
 
+import { partAreaOf, type PartArea } from "../printAreas";
+
 export type V2 = [number, number];
 export type V3 = [number, number, number];
 /** Quaternion [x, y, z, w]. */
@@ -79,6 +81,20 @@ export interface Reach {
   height_mm?: number | null;
   /** Who reaches it: "Left nozzle", "Both nozzles", or an area's name. */
   label: string;
+  /** No print area the part's nozzles reach exists (fp-core `PartArea::Unreachable`):
+   *  it is red, can't be sent, and is never treated as the whole bed. */
+  unreachable?: boolean;
+}
+
+/** Message for a part no nozzle area fits. */
+export const UNREACHABLE_MESSAGE = "No nozzle area fits this part";
+
+/** A reach from the printer settings' `PartArea` (printAreas.ts): null = the whole bed. */
+export function reachFromPartArea(a: PartArea): Reach | null {
+  if (a.kind === "unreachable") return { rect: [0, 0, 0, 0], height_mm: null, label: "No nozzle area", unreachable: true };
+  const area = partAreaOf(a);
+  if (!area) return null;
+  return { rect: [area.x_mm, area.y_mm, area.x_mm + area.width_mm, area.y_mm + area.depth_mm], height_mm: area.height_mm > 0 ? area.height_mm : null, label: area.name };
 }
 
 export interface AreaInfo {
@@ -108,6 +124,8 @@ export interface PlateCheck {
   off_plate: string[];
   /** On the bed, but where the nozzle printing it can't reach. Absent from older backends. */
   out_of_area?: string[];
+  /** Parts no nozzle area fits (also in `out_of_area`). */
+  unreachable?: string[];
   collisions: [string, string][];
   clearance_overlaps: [string, string][];
   too_tall: string[];
@@ -211,7 +229,7 @@ export function reachOf(p: Pick<PlatePart, "area" | "auto_reach">, areas: PlateA
 }
 
 /** The red-state message for a part outside its reach, e.g. "Right nozzle can't reach here". */
-export const outOfAreaMessage = (r: Reach | null) => `${r?.label || "The nozzle"} can't reach here`;
+export const outOfAreaMessage = (r: Reach | null) => (r?.unreachable ? UNREACHABLE_MESSAGE : `${r?.label || "The nozzle"} can't reach here`);
 
 /** True when the outline's bounding box leaves the rectangle. */
 export function outsideRect(o: V2[], r: [number, number, number, number], eps = 0.01): boolean {
@@ -322,7 +340,10 @@ export function liveProblems(parts: PlatePart[], plate: number, bed: BedSize, ar
   const hit = new Set<string>();
   const out = new Set<string>();
   on.forEach((p, i) => {
-    if (outsideRect(polys[i], [0, 0, bed.width_mm, bed.depth_mm])) off.add(p.unit_id);
+    const reach = reachOf(p, areas);
+    // No nozzle area fits it: red wherever it is (it waits beside the bed after Arrange).
+    if (reach?.unreachable) out.add(p.unit_id);
+    else if (outsideRect(polys[i], [0, 0, bed.width_mm, bed.depth_mm])) off.add(p.unit_id);
     else {
       const r = reachOf(p, areas);
       if (r && outsideRect(polys[i], r.rect)) out.add(p.unit_id);
@@ -330,6 +351,8 @@ export function liveProblems(parts: PlatePart[], plate: number, bed: BedSize, ar
   });
   for (let i = 0; i < on.length; i++) {
     for (let j = i + 1; j < on.length; j++) {
+      if (out.has(on[i].unit_id) && reachOf(on[i], areas)?.unreachable) continue;
+      if (out.has(on[j].unit_id) && reachOf(on[j], areas)?.unreachable) continue;
       if (convexOverlap(polys[i], polys[j])) {
         hit.add(on[i].unit_id);
         hit.add(on[j].unit_id);
@@ -480,10 +503,12 @@ export function layoutFor(parts: PlatePart[], order: string[][]): PrintLayout {
 }
 
 /** Status line headline for a check. */
-export function fitHeadline(c: Pick<PlateCheck, "fits" | "plates" | "off_plate" | "collisions" | "too_tall" | "out_of_area">, bigger?: number): {
+export function fitHeadline(c: Pick<PlateCheck, "fits" | "plates" | "off_plate" | "collisions" | "too_tall" | "out_of_area" | "unreachable">, bigger?: number): {
   tone: "ok" | "warn" | "bad";
   text: string;
 } {
+  const none = c.unreachable?.length ?? 0;
+  if (none) return { tone: "bad", text: none === 1 ? UNREACHABLE_MESSAGE : `No nozzle area fits ${none} parts` };
   if (c.too_tall.length) return { tone: "bad", text: `${c.too_tall.length} too tall for this printer` };
   if (bigger) return { tone: "bad", text: `${bigger} bigger than the bed` };
   if (c.off_plate.length) return { tone: "bad", text: `${c.off_plate.length} off the plate` };

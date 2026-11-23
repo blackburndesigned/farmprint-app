@@ -144,9 +144,18 @@ fn reach_printer(feeders: Vec<fp_core::models::PrinterFeeder>, areas: Vec<fp_cor
 fn reach_of(a: &fp_core::PrintArea) -> Reach {
     let spec = &area_specs(std::slice::from_ref(a))[..];
     match spec.first() {
-        Some(sp) => Reach { rect: sp.rect(), height_mm: sp.height_mm, label: a.name.trim().to_string() },
-        None => Reach { rect: [a.x_mm, a.y_mm, a.x_mm, a.y_mm], height_mm: None, label: a.name.trim().to_string() },
+        Some(sp) => Reach { rect: sp.rect(), height_mm: sp.height_mm, label: a.name.trim().to_string(), unreachable: false },
+        None => Reach { rect: [a.x_mm, a.y_mm, a.x_mm, a.y_mm], height_mm: None, label: a.name.trim().to_string(), unreachable: false },
     }
+}
+
+/// fp-core's answer as fp-mesh reads it: the whole bed (None), an area, or a part no
+/// area fits (never the whole bed).
+fn reach_of_part(a: fp_core::print_areas::PartArea) -> Option<Reach> {
+    if a.is_unreachable() {
+        return Some(Reach::unreachable());
+    }
+    a.area().map(reach_of)
 }
 
 /// Where each part must sit, decided by `fp_core::print_areas`: all its slots on
@@ -167,7 +176,7 @@ pub fn reach_context_for(
     units: &[(fp_core::PartUnit, String)],
     slots: &[fp_core::models::PrinterSlot],
 ) -> ReachContext {
-    use fp_core::print_areas::{nozzle_need_for_slots, print_area_for_need, print_area_for_slots, NozzleNeed};
+    use fp_core::print_areas::{nozzle_need_for_slots, print_area_for_slots, shared_area, NozzleNeed};
     let areas = area_specs(&printer.print_areas);
     if areas.is_empty() {
         return ReachContext { areas, nozzles: vec![None; units.len()], autos: vec![None; units.len()], shared: None };
@@ -182,8 +191,9 @@ pub fn reach_context_for(
             NozzleNeed::Unknown => None,
         })
         .collect();
-    let autos = per.iter().map(|s| print_area_for_slots(printer, s).map(reach_of)).collect();
-    let shared = print_area_for_need(printer, NozzleNeed::Both).map(reach_of);
+    let autos = per.iter().map(|s| reach_of_part(print_area_for_slots(printer, s))).collect();
+    // The "both" area, or the computed left/right overlap when there is none.
+    let shared = shared_area(printer).as_ref().map(reach_of);
     ReachContext { areas, nozzles, autos, shared }
 }
 
@@ -341,6 +351,7 @@ fn check_json(c: &plate::PlateCheck, ids: &[String]) -> Value {
         "clearance_overlaps": pairs(&c.clearance_overlaps),
         "too_tall": c.too_tall.iter().map(id).collect::<Vec<_>>(),
         "out_of_area": c.out_of_area.iter().map(id).collect::<Vec<_>>(),
+        "unreachable": c.unreachable.iter().map(id).collect::<Vec<_>>(),
         "taller_than_gantry": c.taller_than_gantry.iter().map(id).collect::<Vec<_>>(),
         "rod_conflicts": pairs(&c.rod_conflicts),
         "over_lid": c.over_lid.iter().map(id).collect::<Vec<_>>(),
@@ -650,6 +661,16 @@ pub fn plan_plates(
     s: &ArrangeSettings,
     reaches: &[Option<Reach>],
 ) -> Result<Vec<Vec<(usize, [f64; 12])>>, String> {
+    // A part no nozzle area fits can't print on this printer, wherever it is put.
+    let unreachable: Vec<&str> = reaches
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.as_ref().is_some_and(|r| r.unreachable))
+        .filter_map(|(i, _)| units.get(i).map(|u| u.0.part_name.as_str()))
+        .collect();
+    if !unreachable.is_empty() {
+        return Err(unreachable_error(&unreachable));
+    }
     match layout {
         Some(l) => {
             let mut by_plate: Vec<Vec<(usize, [f64; 12])>> = Vec::new();
@@ -708,6 +729,12 @@ pub fn plan_plates(
                 .collect())
         }
     }
+}
+
+/// The send error for parts no nozzle area fits.
+pub fn unreachable_error(names: &[&str]) -> String {
+    let what = if names.len() == 1 { "this part".to_string() } else { "these parts".to_string() };
+    format!("{}: {}", names.join(", "), plate::UNREACHABLE_MESSAGE.replace("this part", &what))
 }
 
 #[cfg(test)]
@@ -866,13 +893,57 @@ mod tests {
         assert_eq!(r2[1].as_ref().unwrap().rect[0], 0.0);
         assert_eq!(r2[0], reaches[0]);
         assert_eq!(r2[3], ctx.shared);
-        // No "both" area: a mixed/unknown part gets the whole bed (core's rule).
+        // No "both" area: a mixed/unknown part gets the computed left/right overlap, never
+        // the whole bed.
         let two: Vec<_> = core_areas().into_iter().take(2).collect();
         let ctx2 = reach_context_for(&reach_printer(feeders.clone(), two), &units, &slots);
-        assert!(ctx2.autos[2].is_none() && ctx2.autos[0].is_some());
+        let ov = ctx2.autos[2].clone().unwrap();
+        assert_eq!((ov.rect, ov.height_mm, ov.unreachable), ([20.0, 0.0, 325.0, 320.0], Some(320.0), false));
+        assert_eq!(ctx2.autos[3], ctx2.autos[2]);
+        assert_eq!(ctx2.shared.as_ref().map(|r| r.rect), Some([20.0, 0.0, 325.0, 320.0]));
+        assert_eq!(ctx2.autos[0].as_ref().unwrap().label, "Left nozzle");
         // A printer without areas: no reach at all (whole bed, as before).
         let ctx3 = reach_context_for(&reach_printer(feeders, Vec::new()), &units, &slots);
         assert!(reaches_for(&ctx3, &units, &HashMap::new()).iter().all(|r| r.is_none()));
+    }
+
+    #[test]
+    fn a_part_no_area_fits_is_unreachable_and_never_sent() {
+        let units = vec![unit_fil("a", "fil-red", "#FF0000"), unit_fil("b", "fil-blue", "#0000FF")];
+        let slots = vec![slot(1, "fil-red", "#FF0000"), slot(5, "fil-blue", "#0000FF")];
+        let feeders = vec![feeder(1, 4, Some("left")), feeder(5, 4, Some("right"))];
+        // Only a left area: the right-nozzle part has nowhere to go.
+        let left: Vec<_> = core_areas().into_iter().take(1).collect();
+        let ctx = reach_context_for(&reach_printer(feeders, left), &units, &slots);
+        assert!(!ctx.autos[0].as_ref().unwrap().unreachable);
+        assert!(ctx.autos[1].as_ref().unwrap().unreachable, "{:?}", ctx.autos[1]);
+        let reaches = reaches_for(&ctx, &units, &HashMap::new());
+        assert!(reaches[1].as_ref().unwrap().unreachable);
+        let meshes: Vec<_> = (0..2).map(|_| cube(10.0)).collect();
+        let bed = BedSize { width_mm: 325.0, depth_mm: 320.0, height_mm: None };
+        // Print! (auto layout) and a plate view layout both refuse it.
+        let err = plan_plates(&units, &meshes, None, &bed, &ArrangeSettings::default(), &reaches).unwrap_err();
+        assert!(err.contains("No nozzle area fits this part"), "{err}");
+        let at = |x: f64| Placement { plate: 0, x, y: 100.0, rot_deg: 0.0 };
+        let layout = PrintLayout {
+            parts: vec![
+                PrintLayoutPart { unit_id: "a".into(), orientation: plate::IDENTITY, placement: at(50.0), area: None },
+                PrintLayoutPart { unit_id: "b".into(), orientation: plate::IDENTITY, placement: at(200.0), area: None },
+            ],
+            order: vec![],
+        };
+        assert!(plan_plates(&units, &meshes, Some(&layout), &bed, &ArrangeSettings::default(), &reaches).is_err());
+        // The check flags it; the JSON the UI reads lists it as unreachable and out of area.
+        let refs: Vec<&TriangleMesh> = meshes.iter().collect();
+        let (_, c) = plate::auto_layout_with_reach(&refs, &[], &reaches, &bed, &ArrangeSettings::default());
+        let j = check_json(&c, &["a".into(), "b".into()]);
+        assert_eq!(j["unreachable"], json!(["b"]));
+        assert_eq!(j["out_of_area"], json!(["b"]));
+        assert_eq!(j["fits"], json!(false));
+        // An explicit area pick is the user's override and can make it placeable.
+        let picks = HashMap::from([("b".to_string(), "Left nozzle".to_string())]);
+        assert!(!reaches_for(&ctx, &units, &picks)[1].as_ref().unwrap().unreachable);
+        assert!(unreachable_error(&["A", "B"]).ends_with("No nozzle area fits these parts"));
     }
 
     #[test]
