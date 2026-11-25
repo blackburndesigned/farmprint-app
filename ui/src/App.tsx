@@ -95,6 +95,8 @@ export default function App() {
   }, []);
   const [importDraft, setImportDraft] = useState<CreatedCatalogProductPayload | null>(null);
   const [showNewOrderModal, setShowNewOrderModal] = useState<boolean>(false);
+  /** Order open in the order window (Edit Order), by id. */
+  const [editOrderId, setEditOrderId] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [showFilamentLibrarySheet, setShowFilamentLibrarySheet] = useState<boolean>(false);
   const [kittingCardOrders, setKittingCardOrders] = useState<Order[]>([]);
@@ -498,6 +500,7 @@ export default function App() {
     () => new Map<string, Order>(snapshot.orders.map((o) => [o.id, o])),
     [snapshot.orders]
   );
+  const editingOrder = editOrderId ? orderById.get(editOrderId) ?? null : null;
 
   const productById = useMemo(
     () => new Map<string, Product>(snapshot.products.map((p) => [p.id, p])),
@@ -965,6 +968,7 @@ export default function App() {
         onSelectUnit={handleSelectUnit}
         onRunTransition={runTransition}
         onSnapshotUpdated={setSnapshot}
+        onEditOrder={(o) => setEditOrderId(o.id)}
       />
       {kittingCardOrders.length > 0 && (
         <KittingCardModal
@@ -973,14 +977,18 @@ export default function App() {
         />
       )}
 
-      {showNewOrderModal && (
+      {(showNewOrderModal || editingOrder) && (
         <Suspense fallback={null}>
           <NewOrderSheet
+            // One window for New Order and Edit Order; a fresh one for each order.
+            key={editingOrder ? `edit:${editingOrder.id}` : "new"}
             snapshot={snapshot}
-            onClose={() => setShowNewOrderModal(false)}
+            editOrder={editingOrder}
+            onClose={() => { setShowNewOrderModal(false); setEditOrderId(null); }}
             onCreated={(snap, msg) => {
               setSnapshot(snap);
               setShowNewOrderModal(false);
+              setEditOrderId(null);
               flashBanner(msg);
             }}
             onOrderThumbnails={async (items) => {
@@ -989,12 +997,12 @@ export default function App() {
               for (const it of items) {
                 if (!it.orderLineId) continue;
                 try {
-                  await saveOrderLineThumb(it.orderId, it.orderLineId, it.productId, it.thumbnail, "new_order");
+                  await saveOrderLineThumb(it.orderId, it.orderLineId, it.productId, it.thumbnail, it.source ?? "new_order");
                 } catch {
                   failed += 1;
                 }
               }
-              if (failed) flashBanner(`Order created, but ${failed} order picture${failed === 1 ? "" : "s"} couldn't be saved.`);
+              if (failed) flashBanner(`Order saved, but ${failed} order picture${failed === 1 ? "" : "s"} couldn't be saved.`);
             }}
           />
         </Suspense>

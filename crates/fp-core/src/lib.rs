@@ -3,6 +3,7 @@ pub mod clearance;
 pub mod delta;
 pub mod feeders;
 pub mod models;
+pub mod order_edit;
 pub mod print_areas;
 pub mod sample;
 pub mod seed;

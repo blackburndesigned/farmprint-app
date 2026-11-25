@@ -10,13 +10,12 @@ import { CreatedCatalogProductPayload } from "../../components/ProductImportModa
 import { forgetOrderThumbs } from "../../orderLineThumbs";
 import { KittingCardModal } from "./KittingCardModal";
 import { BulkOrderConfirmModal } from "./BulkOrderConfirmModal";
-import { OrderEditorSheet, useOrderEditorState } from "./OrderEditorSheet";
 import { OrderDetailLineCard, OrderSummaryCard, type UnitStatusConfirm } from "./OrderDetailParts";
 import { ArrowLeft, ChevronLeft, ChevronRight, Tag } from "lucide-react";
 import { Icon } from "../../icons";
 
 /**
- * Full `OrderDetailView.swift` + `OrderEditorSheet.swift` + `AssignPrinterForPrintingSheet.swift` + `KittingCardPrint.swift` 1:1 port.
+ * Full `OrderDetailView.swift` + `AssignPrinterForPrintingSheet.swift` + `KittingCardPrint.swift` 1:1 port.
  */
 export const OrderModals: React.FC<{
   pendingBulkOrder: { order: Order; unfinishedUnits: PartUnit[] } | null;
@@ -33,6 +32,8 @@ export const OrderModals: React.FC<{
   onSelectUnit: (unit: PartUnit, e: React.MouseEvent<HTMLElement>) => void;
   onRunTransition: (req: TransitionRequest) => void;
   onSnapshotUpdated?: (s: ShopSnapshot) => void;
+  /** Opens the order window (the New Order window) on this order. */
+  onEditOrder?: (order: Order) => void;
 }> = ({
   pendingBulkOrder,
   onCloseBulkOrder,
@@ -48,10 +49,10 @@ export const OrderModals: React.FC<{
   onSelectUnit,
   onRunTransition,
   onSnapshotUpdated,
+  onEditOrder,
 }) => {
   const [confirmTarget, setConfirmTarget] = useState<UnitStatusConfirm | null>(null);
 
-  const [showEditOrder, setShowEditOrder] = useState(false);
   const [enlargedLineId, setEnlargedLineId] = useState<string | null>(null);
   const [rePoseLineId, setRePoseLineId] = useState<string | null>(null);
   useEffect(() => {
@@ -76,8 +77,9 @@ export const OrderModals: React.FC<{
   );
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const editor = useOrderEditorState(selectedOrder);
-  const { editNotes, setEditNotes } = editor;
+  // The details card's inline notes field, reset when another order (or a newer copy) shows.
+  const [editNotes, setEditNotes] = useState("");
+  useEffect(() => { setEditNotes(selectedOrder?.notes || ""); }, [selectedOrder]);
 
   const adjacentOrders = useMemo(() => {
     if (!selectedOrder || allOrders.length === 0) return { prev: null, next: null };
@@ -264,9 +266,10 @@ export const OrderModals: React.FC<{
                 <button
                   type="button"
                   className="fp-btn fp-btn-sm"
-                  onClick={() => setShowEditOrder(true)}
+                  onClick={() => onEditOrder?.(selectedOrder)}
+                  title="Change this order's products, quantities, colors, inscriptions and details"
                 >
-                  Edit…
+                  Edit Order…
                 </button>
 
                 <button
@@ -473,18 +476,6 @@ export const OrderModals: React.FC<{
             </div>
           </div>
         </div>
-      )}
-
-      {/* OrderEditorSheet.swift Multi-Line Order Editor Modal */}
-      {showEditOrder && selectedOrder && (
-        <OrderEditorSheet
-          selectedOrder={selectedOrder}
-          editor={editor}
-          productById={productById}
-          filaments={filaments}
-          onSnapshotUpdated={onSnapshotUpdated}
-          onClose={() => setShowEditOrder(false)}
-        />
       )}
 
       {/* KittingCardPrint.swift 4×6 Kitting Card Modal */}

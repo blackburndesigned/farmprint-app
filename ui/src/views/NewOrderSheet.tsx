@@ -1,6 +1,6 @@
 import { modKey } from "../platform";
 /**
- * New Order sheet — port of Swift `OrderEditorSheet` (.add mode).
+ * New Order / Edit Order window — port of Swift `OrderEditorSheet` (.add and .edit modes).
  *
  * Flow (same as Swift):
  *   1. "Choose a product" grid (adaptive cards, composite preview + name).
@@ -8,6 +8,11 @@ import { modKey } from "../platform";
  *      left = color preview (fills the column; live 3D viewport when a model is available),
  *      right = Form (Order / Quantity / Test bench / Parts with thumb grid) or the filament picker panel.
  *   Toolbar: Cancel (left), Create Order (right, only while configuring, Enter).
+ *
+ * Edit Order uses this same window (`editOrder`): it opens on the order's products with
+ * their quantities, colors, inscriptions and the order details filled in, and Save Changes
+ * sends the whole order to fp-core `apply_order_edit`, which keeps every part that already
+ * started (see orderEditDraft.ts and fp-core order_edit.rs).
  *
  * Colors: a new draft line starts from the catalog "preview" colors
  * (previewColors.ts — seeded arbitrary colors, picture-only parts keep their saved
@@ -18,13 +23,23 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { askConfirm } from "../uiFeedback";
 import { invoke } from "../tauriInvoke";
 import { useShopSettings } from "../settingsStore";
-import { CatalogPart, FilamentSwatch, Product, ShopSnapshot } from "../types";
+import { CatalogPart, FilamentSwatch, Order, Product, ShopSnapshot } from "../types";
 import { PartThumb, ProductCompositeThumb } from "../partThumbnails";
 import { isPictureOnlyCatalogPart, previewColorsForProduct, previewCompositeParts } from "../previewColors";
 import { OrderThumbnailCapture, OrderViewport3D, OrderViewport3DHandle, renderOrderThumbnail } from "../components/OrderViewport3D";
 import type { CameraState } from "../viewportCamera";
 import { Trash2, User } from "lucide-react";
 import { Icon } from "../icons";
+import { lineViewCamera, useOrderLineThumb } from "../orderLineThumbs";
+import {
+  draftLinesFromOrder,
+  draftQty,
+  OrderDraftLine,
+  OrderEditPlan,
+  orderEditPayload,
+  shippingCents,
+  startedByPart,
+} from "./orderEditDraft";
 
 /** One created order line's own picture. Persist per order line, locally only. */
 export interface NewOrderLineThumbnail {
@@ -34,24 +49,17 @@ export interface NewOrderLineThumbnail {
   lineIndex: number;
   productId: string;
   thumbnail: OrderThumbnailCapture;
+  /** Why the picture was made (default "new_order"; "recolor" for an edited line). */
+  source?: "new_order" | "recolor";
 }
 
 /** Swift OrderLogic.maxUnitOrderBurst */
 const MAX_UNIT_ORDER_BURST = 200;
 const PART_THUMB = 88;
 
-interface DraftLine {
-  id: string;
-  product: Product;
-  quantityText: string;
-  /** part id -> filament id (library swatch). Missing = no library match; hex in previewHex. */
-  partFilaments: Record<string, string>;
-  /** part id -> hex shown when no filament chosen yet. */
-  previewHex: Record<string, string>;
-  customText: string;
-}
+type DraftLine = OrderDraftLine;
 
-const qtyOf = (l: DraftLine) => Math.max(1, parseInt(l.quantityText, 10) || 1);
+const qtyOf = draftQty;
 const sortedParts = (p: Product) => [...p.parts].sort((a, b) => a.sort_order - b.sort_order);
 /** Swift ThumbnailOnlyFilter.textParts: everything except picture-only parts. */
 const colorPartsOf = (p: Product) => sortedParts(p).filter((pt) => !isPictureOnlyCatalogPart(pt));
@@ -88,21 +96,41 @@ export const NewOrderSheet: React.FC<{
   onCreated: (snap: ShopSnapshot, message: string) => void;
   /** Called after Create Order with each new line's picture + camera (before onCreated). */
   onOrderThumbnails?: (items: NewOrderLineThumbnail[]) => void | Promise<void>;
-}> = ({ snapshot, onClose, onCreated, onOrderThumbnails }) => {
+  /** Edit this order instead of making a new one (title "Edit Order #code", Save Changes). */
+  editOrder?: Order | null;
+}> = ({ snapshot, onClose, onCreated, onOrderThumbnails, editOrder = null }) => {
   const filaments = snapshot.filaments;
   const filamentById = useMemo(() => new Map(filaments.map((f) => [f.id, f])), [filaments]);
+  const isEdit = !!editOrder;
+  // The order as the window opened (Edit Order): the draft starts from it, and Cancel or a
+  // click outside compares against it.
+  const [initial] = useState(() => {
+    const lines = editOrder ? draftLinesFromOrder(editOrder, snapshot.products, filaments) : [];
+    return {
+      lines,
+      customerName: editOrder?.customer_name ?? "",
+      customerEmail: editOrder?.customer_email ?? "",
+      notes: editOrder?.notes ?? "",
+      isRush: editOrder?.is_rush ?? false,
+      isOnHold: editOrder?.is_on_hold ?? false,
+      shippingText: editOrder ? (editOrder.shipping_charged_cents / 100).toFixed(2) : "",
+    };
+  });
 
-  const testBenchEnabled = !!useShopSettings().test_bench_enabled;
-  const [step, setStep] = useState<"pickProduct" | "configure">("pickProduct");
-  const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
-  const [activeLineId, setActiveLineId] = useState<string | null>(null);
+  const testBenchEnabled = !!useShopSettings().test_bench_enabled && !isEdit;
+  const [step, setStep] = useState<"pickProduct" | "configure">(initial.lines.length ? "configure" : "pickProduct");
+  const [draftLines, setDraftLines] = useState<DraftLine[]>(initial.lines);
+  const [activeLineId, setActiveLineId] = useState<string | null>(initial.lines[0]?.id ?? null);
   const [pickingAdditionalLine, setPickingAdditionalLine] = useState(false);
 
-  const [customerName, setCustomerName] = useState("");
-  const [linkedCustomer, setLinkedCustomer] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
-  const [isRush, setIsRush] = useState(false);
-  const [isOnHold, setIsOnHold] = useState(false);
+  const [customerName, setCustomerName] = useState(initial.customerName);
+  const [customerEmail, setCustomerEmail] = useState(initial.customerEmail);
+  // An existing order's customer is already linked: no name suggestions until it's retyped.
+  const [linkedCustomer, setLinkedCustomer] = useState<string | null>(isEdit ? initial.customerName : null);
+  const [notes, setNotes] = useState(initial.notes);
+  const [isRush, setIsRush] = useState(initial.isRush);
+  const [isOnHold, setIsOnHold] = useState(initial.isOnHold);
+  const [shippingText, setShippingText] = useState(initial.shippingText);
   const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   const [pickerPartId, setPickerPartId] = useState<string | null>(null);
@@ -143,10 +171,26 @@ export const NewOrderSheet: React.FC<{
   const unitBurstCount = draftLines.reduce((s, l) => s + qtyOf(l), 0);
   const isPickerOpen = pickerPartId !== null || showPickerForSelection;
 
-  const title =
-    step === "pickProduct"
+  const title = isEdit
+    ? step === "pickProduct"
+      ? pickingAdditionalLine ? "Add product" : "Change product"
+      : `Edit Order #${editOrder!.order_code}`
+    : step === "pickProduct"
       ? pickingAdditionalLine ? "Add product" : "New Order"
       : isMultiLine ? `New Order — ${draftLines.length} products` : `New Order — ${product?.name ?? ""}`;
+
+  // Edit Order: parts of the active line that already started (they keep their state).
+  const startedParts = useMemo(() => startedByPart(editOrder, activeLine?.lineId), [editOrder, activeLine?.lineId]);
+  const activeStarted = [...startedParts.values()].reduce((a, b) => a + b, 0);
+  // Edit Order: start a loaded line's 3D view from its saved picture's camera (or the
+  // website customer's angle) the first time it's shown.
+  const loadedLine = activeLine?.lineId ? editOrder?.lines.find((l) => l.id === activeLine.lineId) : undefined;
+  const savedThumb = useOrderLineThumb(editOrder?.id ?? "", loadedLine?.id ?? "");
+  const savedCamera = loadedLine ? savedThumb?.camera ?? lineViewCamera(loadedLine) : null;
+  const viewWaitsForSaved = !!loadedLine && savedThumb === undefined;
+  // A loaded line that has an inscription keeps the field even if the product's setting
+  // changed since, so the text can still be seen and edited.
+  const showInscription = !!activeLine && (activeLine.product.supports_custom_text || !!loadedLine?.custom_text);
 
   const hexFor = (line: DraftLine, pt: CatalogPart) =>
     filamentById.get(line.partFilaments[pt.id])?.hex || line.previewHex[pt.id] || "#8E8E93";
@@ -279,7 +323,7 @@ export const NewOrderSheet: React.FC<{
     const [first, ...rest] = lines;
     let snap = await invoke<ShopSnapshot>("create_order", {
       customerName: name,
-      customerEmail: "",
+      customerEmail: customerEmail.trim(),
       productId: first.line.product.id,
       quantity: first.qty,
       customText: first.line.customText.trim() || null,
@@ -320,6 +364,7 @@ export const NewOrderSheet: React.FC<{
   const validate = (): boolean => {
     if (!customerName.trim()) { setValidationError("Customer / name is required"); return false; }
     if (!draftLines.length) { setValidationError("Add at least one product"); return false; }
+    if (isEdit && Number.isNaN(shippingCents(shippingText))) { setValidationError("Shipping must be an amount like 5.99"); return false; }
     setValidationError(null);
     return true;
   };
@@ -359,10 +404,70 @@ export const NewOrderSheet: React.FC<{
     try { if (items.length) await onOrderThumbnails(items); } catch { /* picture is optional; the order exists */ }
   };
 
+  // Edit Order: pictures for the lines whose product or colors changed, or that are new.
+  const editedLineShots = async (): Promise<Array<{ line: DraftLine; shot: OrderThumbnailCapture | null }>> => {
+    const out: Array<{ line: DraftLine; shot: OrderThumbnailCapture | null }> = [];
+    for (const l of draftLines) {
+      const changed = !l.lineId || Object.entries(l.partFilaments).some(([pid, f]) => l.initialFilaments?.[pid] !== f);
+      if (!changed) continue;
+      try {
+        const live = l.id === activeLine?.id ? orderViewportRef.current?.capture(1024) ?? null : null;
+        out.push({ line: l, shot: live ?? await renderOrderThumbnail(l.product, colorsFor(l), lineCamerasRef.current[camKey(l)] ?? null, { filaments }) });
+      } catch { out.push({ line: l, shot: null }); }
+    }
+    return out;
+  };
+
+  const saveEdit = async () => {
+    const order = editOrder!;
+    const details = { customerName, customerEmail, notes, isRush, isOnHold, shippingText };
+    const plan = await invoke<OrderEditPlan>("plan_order_edit", { input: orderEditPayload(order, draftLines, details) });
+    let confirmStarted = false;
+    if (plan.warnings.length) {
+      const ok = await askConfirm({
+        title: plan.needs_confirm ? `Remove started parts from #${order.order_code}?` : `Save changes to #${order.order_code}?`,
+        message: plan.warnings.join("\n") + (plan.needs_confirm ? "\nThis is logged in Flow." : ""),
+        confirmLabel: plan.needs_confirm ? "Remove and Save" : "Save Changes",
+        cancelLabel: "Keep editing",
+        danger: plan.needs_confirm,
+      });
+      if (!ok) return;
+      confirmStarted = plan.needs_confirm;
+    }
+    const shots = onOrderThumbnails ? await editedLineShots() : [];
+    const before = new Set(order.lines.map((l) => l.id));
+    const snap = await invoke<ShopSnapshot>("apply_order_edit", { input: orderEditPayload(order, draftLines, details, confirmStarted) });
+    if (onOrderThumbnails && shots.length) {
+      const saved = snap.orders.find((o) => o.id === order.id);
+      const used = new Set<string>();
+      const items: NewOrderLineThumbnail[] = [];
+      shots.forEach(({ line, shot }) => {
+        if (!shot || !saved) return;
+        const lineIndex = draftLines.indexOf(line);
+        const ol = line.lineId && saved.lines.some((x) => x.id === line.lineId)
+          ? saved.lines.find((x) => x.id === line.lineId)
+          : saved.lines.find((x) => !before.has(x.id) && !used.has(x.id) && x.product_id === line.product.id);
+        if (!ol) return;
+        used.add(ol.id);
+        items.push({ orderId: order.id, orderLineId: ol.id, lineIndex, productId: line.product.id, thumbnail: shot, source: line.lineId ? "recolor" : "new_order" });
+      });
+      try { if (items.length) await onOrderThumbnails(items); } catch { /* pictures are optional */ }
+    }
+    onCreated(snap, `Saved changes to #${order.order_code}`);
+  };
+
   const save = async () => {
     if (busyRef.current || !validate() || busy) return;
     busyRef.current = true;
     setBusy(true);
+    if (isEdit) {
+      try {
+        await saveEdit();
+      } catch (e) {
+        setValidationError(`Could not save changes: ${String(e)}`);
+      } finally { busyRef.current = false; setBusy(false); }
+      return;
+    }
     try {
       const shots = await captureLines();
       const snap = await createOne(draftLines.map((l) => ({ line: l, qty: qtyOf(l), filamentMap: l.partFilaments })));
@@ -567,7 +672,19 @@ export const NewOrderSheet: React.FC<{
         {suggestions.map((s) => (
           <button key={s} style={{ ...linkBtn, color: secondary, textAlign: "left" }} onClick={() => { setCustomerName(s); setLinkedCustomer(s); }}><Icon icon={User} size={13} /> {s}</button>
         ))}
+        <input placeholder="Email (optional)" value={customerEmail} style={field} type="email" aria-label="Customer email"
+          onChange={(e) => setCustomerEmail(e.target.value)} />
         <textarea placeholder="Notes" value={notes} rows={2} style={{ ...field, resize: "vertical" }} onChange={(e) => setNotes(e.target.value)} />
+        {isEdit && (
+          <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 13 }}>
+            Shipping charged
+            <input value={shippingText} inputMode="decimal" aria-label="Shipping charged" placeholder="0.00"
+              style={{ ...field, width: 110, textAlign: "right" }} onChange={(e) => setShippingText(e.target.value)} />
+          </label>
+        )}
+        {isEdit && editOrder!.source === "website" && (
+          <div style={caption}>Website order: changes stay in FarmPrint; the store's copy isn't changed.</div>
+        )}
         {toggle("Rush", isRush, setIsRush)}
         {toggle("Hold", isOnHold, setIsOnHold)}
         <div style={caption}>Hold keeps the order on the Orders board and hides it from ANDON and Parts to Print.</div>
@@ -580,7 +697,13 @@ export const NewOrderSheet: React.FC<{
         <div style={caption}>
           {isMultiLine ? "Each product line keeps its own quantity and colors (one order)." : "Quantity stays on this product. Add another product for a second color mix."}
         </div>
-        {activeLine.product.supports_custom_text && (
+        {activeStarted > 0 && (
+          <div style={{ ...caption, color: "#ffd60a" }}>
+            {activeStarted} part{activeStarted === 1 ? " has" : "s have"} already started on this line. They keep their state and color;
+            changes apply to queued parts, and a lower quantity removes queued copies first.
+          </div>
+        )}
+        {showInscription && (
           <input placeholder="Inscription text" value={activeLine.customText} style={field}
             onChange={(e) => updateActive((l) => ({ ...l, customText: e.target.value }))} />
         )}
@@ -619,6 +742,11 @@ export const NewOrderSheet: React.FC<{
                 </div>
                 <div style={{ fontSize: 10.5, fontWeight: 600, textAlign: "center", width: PART_THUMB + 12, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{pt.name}</div>
                 <div style={{ fontSize: 9, color: secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: PART_THUMB + 12 }}>{filamentNameFor(activeLine, pt)}</div>
+                {(startedParts.get(pt.id) ?? 0) > 0 && (
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "#30d158" }} title="Already staged, printing or done; keeps its state and color">
+                    {startedParts.get(pt.id)} started
+                  </div>
+                )}
               </button>
             );
           })}
@@ -686,7 +814,7 @@ export const NewOrderSheet: React.FC<{
             }}>
               {/* 3D order builder: turn the model, click a part to set its filament; the view is this order's picture. */}
               <OrderViewport3D
-                key={camKey(activeLine)}
+                key={`${camKey(activeLine)}${viewWaitsForSaved ? ":loading" : ""}`}
                 ref={orderViewportRef}
                 product={product}
                 filaments={filaments}
@@ -696,11 +824,11 @@ export const NewOrderSheet: React.FC<{
                   const index = colorParts.findIndex((p) => p.id === id);
                   if (index >= 0) handlePartClick(mods as unknown as React.MouseEvent, colorParts[index], index);
                 }}
-                initialCamera={lineCamerasRef.current[camKey(activeLine)] ?? null}
+                initialCamera={lineCamerasRef.current[camKey(activeLine)] ?? savedCamera ?? null}
                 onCameraChange={(cam) => { lineCamerasRef.current[camKey(activeLine)] = cam; }}
                 fallback={
                   <ProductCompositeThumb productIdOrName={product.id} parts={compositeFor(activeLine)} size={Math.max(430, previewBox - 10)} liveTint
-                    inscriptionText={product.supports_custom_text ? activeLine.customText : null} />
+                    inscriptionText={showInscription ? activeLine.customText : null} />
                 }
               />
             </div>
@@ -714,14 +842,17 @@ export const NewOrderSheet: React.FC<{
 
   // A click outside closes only an empty order; with any work in it, ask first.
   const handleBackdropClick = () => {
-    const dirty = draftLines.length > 0 || customerName.trim() !== "" || notes.trim() !== "" || isRush || isOnHold;
+    const dirty = isEdit
+      ? JSON.stringify([draftLines, customerName, customerEmail, notes, isRush, isOnHold, shippingText]) !==
+        JSON.stringify([initial.lines, initial.customerName, initial.customerEmail, initial.notes, initial.isRush, initial.isOnHold, initial.shippingText])
+      : draftLines.length > 0 || customerName.trim() !== "" || notes.trim() !== "" || isRush || isOnHold;
     if (!dirty) {
       onClose();
       return;
     }
     void askConfirm({
-      title: "Discard this new order?",
-      message: "The products and details you entered have not been saved.",
+      title: isEdit ? "Discard your changes?" : "Discard this new order?",
+      message: isEdit ? `Your changes to #${editOrder!.order_code} have not been saved.` : "The products and details you entered have not been saved.",
       confirmLabel: "Discard",
       cancelLabel: "Keep editing",
       danger: true,
@@ -745,7 +876,7 @@ export const NewOrderSheet: React.FC<{
           <button className="fp-btn" onClick={onClose}>Cancel</button>
           <div className="fp-modal-title">{title}</div>
           {step === "configure"
-            ? <button className="fp-btn fp-btn-primary" disabled={busy} onClick={() => void save()}>Create Order</button>
+            ? <button className="fp-btn fp-btn-primary" disabled={busy} onClick={() => void save()}>{isEdit ? "Save Changes" : "Create Order"}</button>
             : <span style={{ width: 90 }} />}
         </div>
         {step === "pickProduct" ? productPicker : configurePane}

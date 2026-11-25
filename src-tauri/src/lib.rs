@@ -1653,6 +1653,22 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
         }
+        "plan_order_edit" | "apply_order_edit" => {
+            let raw = args.get("input").cloned().unwrap_or_else(|| args.clone());
+            let input: fp_core::order_edit::OrderEditInput =
+                serde_json::from_value(raw).map_err(|e| e.to_string())?;
+            let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            if cmd == "plan_order_edit" {
+                let plan = ledger.plan_order_edit(&input).map_err(|e| e.to_string())?;
+                return serde_json::to_value(plan).map_err(|e| e.to_string());
+            }
+            let (snap, removed_lines) =
+                ledger.apply_order_edit(&input).map_err(|e| e.to_string())?;
+            for line_id in &removed_lines {
+                orderthumbs::delete_line_anywhere(&state.data_dir, line_id);
+            }
+            serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
         "delete_order_line" => {
             let line_id = args
                 .get("line_id")
