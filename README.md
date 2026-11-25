@@ -15,7 +15,8 @@
 - **Printers and plates.** Assign parts to your printers and send them straight to your slicer: Bambu Studio, OrcaSlicer or PrusaSlicer. Parts land on a plate there, each one named with its order number, part and color.
 - **ANDON board.** A big-screen view of what's printing, what's stuck and what needs attention.
 - **Kitting cards.** Printable cards with product pictures and a checkbox parts list for packing each order.
-- **Ready to Ship, History, Overstock and Production Value.** See what's ready to go out, what already went out, leftover parts you can reuse, and what your work is worth.
+- **Ready to Ship, History and Overstock.** See what's ready to go out, what already went out, and leftover parts you can reuse.
+- **Insights.** Speed, quality, money, customers and materials for any date range, compared with the period before, with the orders behind every number and CSV export.
 - **Works for any product.** Nothing is built around one shop's products. Import your own 3MF or STL files and set them up however you like.
 
 Your data stays on your computer. FarmPrint doesn't need an account, and it doesn't send your orders anywhere unless you connect your own shop.

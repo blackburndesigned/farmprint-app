@@ -38,12 +38,12 @@ import {
 import {
   FlowView,
   HistoryView,
-  ProductionValueView,
 } from "./views/FlowAnalyticsViews";
 import { saveOrderLineThumb, useOrderThumbAutoRender } from "./orderLineThumbs";
 import { clearOrderModelCache } from "./components/orderModelCache";
 import { KittingCardModal, OrderModals, UnitStatePopover } from "./views/ModalsAndDock";
 import { PeopleView, SettingsModal } from "./components/SettingsAndPeopleViews";
+import { InsightsView } from "./views/insights/InsightsView";
 import { ConfirmHost, askConfirm, useBannerBus } from "./uiFeedback";
 import { type PendingPrintPick, PrinterPickModal } from "./views/printers/PrinterPickModal";
 import { type TransitionOptions, canConfirmPick, confirmedPickRequest, transitionArgs } from "./views/printers/markPrinting";
@@ -673,6 +673,7 @@ export default function App() {
           products: snapshot.products.length,
           ready: readyToShipOrders.length,
           history: historyOrders.length,
+          insights: undefined,
         };
 
   // App lock: nothing from the shop renders until the lock status is known, and only the
@@ -928,12 +929,8 @@ export default function App() {
           />
         )}
 
-        {activeTab === "value" && (
-          <ProductionValueView
-            analytics={snapshot.analytics}
-            orders={snapshot.orders}
-            snapshot={snapshot}
-          />
+        {activeTab === "insights" && (
+          <InsightsView refreshKey={snapshot} onSelectOrder={(id) => setSelectedOrderId(id)} />
         )}
 
         {activeTab === "people" && (

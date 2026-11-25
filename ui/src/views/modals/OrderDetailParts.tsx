@@ -191,7 +191,8 @@ export const OrderSummaryCard: React.FC<{
             { label: "Products", value: `${selectedOrder.lines.length} (${totalQty} qty)` },
             { label: "Placed", value: new Date(selectedOrder.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) },
             { label: "Source", value: selectedOrder.source || "website" },
-            { label: "Cost", value: fmtUsd(selectedOrder.estimated_cost_cents) },
+            ...(selectedOrder.ship_by ? [{ label: "Ship by", value: shipByLabel(selectedOrder.ship_by) }] : []),
+            { label: "Cost (est.)", value: fmtUsd(selectedOrder.estimated_cost_cents) },
             { label: "Price", value: fmtUsd(selectedOrder.total_revenue_cents) },
           ].map((f) => (
             <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -200,10 +201,22 @@ export const OrderSummaryCard: React.FC<{
             </div>
           ))}
         </div>
+        {selectedOrder.packaging_cost_set === false && (
+          <div style={{ fontSize: 11, color: "rgba(235,235,245,0.5)", marginTop: 8 }}>
+            Cost estimate: packaging cost not set (counted as $0). Set it in Settings › General.
+          </div>
+        )}
       </div>
     </>
   );
 };
+
+/** "YYYY-MM-DD" ship-by date as a short local date. */
+function shipByLabel(d: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  if (!m) return d;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 /** OrderDetailView.swift multiProductParts: one product line (picture, status menu, part tiles). */
 export const OrderDetailLineCard: React.FC<{

@@ -66,6 +66,13 @@ pub const PRINTER_CLEARANCE_COLUMNS: [(&str, &str); 4] = [
 /// Feeder nozzle for print areas (2026-11-22): nullable, additive. Schema version unchanged (3).
 pub const FEEDER_NOZZLE_COLUMNS: [(&str, &str); 1] = [("nozzle", "TEXT")];
 
+/// Optional ship-by date on orders (`YYYY-MM-DD`, 2026-11-25): nullable, additive.
+/// Schema version unchanged (3).
+pub const ORDER_SHIP_BY_COLUMNS: [(&str, &str); 1] = [("ship_by", "TEXT")];
+
+/// `shop_settings` key holding when Insights tracking began (`InsightsTracking`).
+pub const INSIGHTS_TRACKING_KEY: &str = "insights_tracking";
+
 pub fn init_schema(conn: &Connection) -> CoreResult<()> {
     init_tables(conn)?;
     add_missing_columns(conn, "orders", &ORDER_SHIP_COLUMNS)?;
@@ -75,6 +82,26 @@ pub fn init_schema(conn: &Connection) -> CoreResult<()> {
     add_missing_columns(conn, "printers", &PRINTER_BED_COLUMNS)?;
     add_missing_columns(conn, "printers", &PRINTER_CLEARANCE_COLUMNS)?;
     add_missing_columns(conn, "filaments", &FILAMENT_VENDOR_COLUMNS)?;
+    add_missing_columns(conn, "orders", &ORDER_SHIP_BY_COLUMNS)?;
+    // Printer status history (2026-11-25): one row per status change, for Insights
+    // utilization. Additive, local only. Schema version unchanged (3).
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS printer_status_log (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            printer_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            changed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_printer_status_log_printer ON printer_status_log(printer_id, seq);",
+    )?;
+    // When ship-by dates and printer history started being kept ("Collecting since").
+    conn.execute(
+        "INSERT OR IGNORE INTO shop_settings (key, value_json) VALUES (?1, ?2)",
+        rusqlite::params![
+            INSIGHTS_TRACKING_KEY,
+            serde_json::json!({ "since": chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string() }).to_string()
+        ],
+    )?;
     // Lookup indexes (additive, schema version unchanged). Safe to run on every open.
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_order_lines_order ON order_lines(order_id);

@@ -8,7 +8,42 @@ import { ShopSettings, ShopSnapshot } from "../../types";
 import { SampleShopSettingsSection } from "../SampleShop";
 import { Row, Section, Segmented, type Setter, copyText, revealInFileManager } from "./settingsUi";
 
-// --- General (About, Security, Navigation, Data) -------------------------------
+/** Number box where blank means "not set" (null), never a made-up default. Saves on blur/Enter. */
+const OptionalNumberField: React.FC<{
+  value: number | null;
+  decimals: number;
+  placeholder: string;
+  ariaLabel: string;
+  onCommit: (v: number | null) => void;
+}> = ({ value, decimals, placeholder, ariaLabel, onCommit }) => {
+  const shown = value == null ? "" : decimals > 0 ? value.toFixed(decimals) : String(value);
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  const commit = () => {
+    const t = text.trim().replace(/^\$/, "");
+    if (!t) return onCommit(null);
+    const n = Number(t);
+    if (!Number.isFinite(n) || n < 0) return setText(shown);
+    onCommit(n);
+  };
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      aria-label={ariaLabel}
+      value={text}
+      placeholder={placeholder}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      style={{ width: 110, padding: "6px 8px", borderRadius: 6, textAlign: "right" }}
+    />
+  );
+};
+
+// --- General (About, Security, Navigation, Costs & targets, Data) ---------------
 
 export const GeneralTab: React.FC<{
   open: boolean;
@@ -83,6 +118,29 @@ export const GeneralTab: React.FC<{
               [14, "14 days"],
             ]}
             onChange={(v) => patch({ orders_late_after_days: v })}
+          />
+        </Row>
+      </Section>
+      <Section
+        title="Costs & targets"
+        footer="Both start blank. Blank packaging cost counts as $0 in margin estimates (marked “packaging cost not set”). Blank target days means orders without a ship-by date have no on-time target."
+      >
+        <Row label="Packaging cost per order ($)">
+          <OptionalNumberField
+            ariaLabel="Packaging cost per order"
+            value={settings.packaging_cost_cents == null ? null : settings.packaging_cost_cents / 100}
+            decimals={2}
+            placeholder="Not set"
+            onCommit={(v) => patch({ packaging_cost_cents: v == null ? null : Math.round(v * 100) })}
+          />
+        </Row>
+        <Row label="Default target (days to ship)">
+          <OptionalNumberField
+            ariaLabel="Default target days to ship"
+            value={settings.default_target_days ?? null}
+            decimals={0}
+            placeholder="No target"
+            onCommit={(v) => patch({ default_target_days: v == null ? null : Math.round(v) })}
           />
         </Row>
       </Section>

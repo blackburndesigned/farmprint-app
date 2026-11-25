@@ -1590,7 +1590,16 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
             let notes = args
                 .get("notes")
                 .and_then(|v| v.as_str().map(|s| s.to_string()));
+            let ship_by = args
+                .get("ship_by")
+                .or_else(|| args.get("shipBy"))
+                .and_then(|v| v.as_str().map(|s| s.to_string()));
             let mut ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            if let Some(sb) = &ship_by {
+                ledger
+                    .set_order_ship_by(order_id, sb)
+                    .map_err(|e| e.to_string())?;
+            }
             let snap = ledger
                 .update_order_metadata(
                     order_id,
@@ -1652,6 +1661,32 @@ fn dispatch_invoke_inner(state: &AppState, cmd: &str, args: Value) -> Result<Val
                 )
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(snap).map_err(|e| e.to_string())
+        }
+        "insights" | "insights_drilldown" | "insights_csv" => {
+            let raw = args.get("query").cloned().unwrap_or_else(|| json!({}));
+            let query: fp_core::insights::InsightsQuery =
+                serde_json::from_value(raw).map_err(|e| e.to_string())?;
+            let metric = args.get("metric").and_then(|v| v.as_str());
+            let key = args.get("key").and_then(|v| v.as_str());
+            let ledger = state.ledger.lock().map_err(|e| e.to_string())?;
+            match cmd {
+                "insights" => {
+                    let out = ledger.insights(&query).map_err(|e| e.to_string())?;
+                    serde_json::to_value(out).map_err(|e| e.to_string())
+                }
+                "insights_drilldown" => {
+                    let out = ledger
+                        .insights_drilldown(&query, metric.unwrap_or_default(), key)
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_value(out).map_err(|e| e.to_string())
+                }
+                _ => {
+                    let csv = ledger
+                        .insights_csv(&query, metric)
+                        .map_err(|e| e.to_string())?;
+                    Ok(json!({ "csv": csv }))
+                }
+            }
         }
         "plan_order_edit" | "apply_order_edit" => {
             let raw = args.get("input").cloned().unwrap_or_else(|| args.clone());

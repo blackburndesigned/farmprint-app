@@ -114,6 +114,7 @@ export const NewOrderSheet: React.FC<{
       isRush: editOrder?.is_rush ?? false,
       isOnHold: editOrder?.is_on_hold ?? false,
       shippingText: editOrder ? (editOrder.shipping_charged_cents / 100).toFixed(2) : "",
+      shipBy: editOrder?.ship_by ?? "",
     };
   });
 
@@ -131,6 +132,7 @@ export const NewOrderSheet: React.FC<{
   const [isRush, setIsRush] = useState(initial.isRush);
   const [isOnHold, setIsOnHold] = useState(initial.isOnHold);
   const [shippingText, setShippingText] = useState(initial.shippingText);
+  const [shipBy, setShipBy] = useState(initial.shipBy);
   const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   const [pickerPartId, setPickerPartId] = useState<string | null>(null);
@@ -351,11 +353,12 @@ export const NewOrderSheet: React.FC<{
         filamentOverrides: r.filamentMap,
       });
     }
-    if (notes.trim() || isOnHold) {
+    if (notes.trim() || isOnHold || shipBy) {
       snap = await invoke<ShopSnapshot>("update_order_metadata", {
         orderId: created.id,
         notes: notes.trim() || null,
         isOnHold: isOnHold ? true : null,
+        shipBy: shipBy || null,
       });
     }
     return snap;
@@ -420,7 +423,7 @@ export const NewOrderSheet: React.FC<{
 
   const saveEdit = async () => {
     const order = editOrder!;
-    const details = { customerName, customerEmail, notes, isRush, isOnHold, shippingText };
+    const details = { customerName, customerEmail, notes, isRush, isOnHold, shippingText, shipBy };
     const plan = await invoke<OrderEditPlan>("plan_order_edit", { input: orderEditPayload(order, draftLines, details) });
     let confirmStarted = false;
     if (plan.warnings.length) {
@@ -688,7 +691,17 @@ export const NewOrderSheet: React.FC<{
         {toggle("Rush", isRush, setIsRush)}
         {toggle("Hold", isOnHold, setIsOnHold)}
         <div style={caption}>Hold keeps the order on the Orders board and hides it from ANDON and Parts to Print.</div>
-        {/* TODO(due date): add a "Due date" toggle + date picker once orders have a due_date field. */}
+        <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 13 }}>
+          Ship by
+          <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={shipBy} aria-label="Ship by date" data-fp-ship-by="1"
+              style={{ ...field, width: 150 }} onChange={(e) => setShipBy(e.target.value)} />
+            {shipBy && (
+              <button type="button" style={{ ...linkBtn, color: secondary }} aria-label="Clear ship-by date" onClick={() => setShipBy("")}>Clear</button>
+            )}
+          </span>
+        </label>
+        <div style={caption}>Optional. Used for on-time rate in Insights; blank uses the shop's default target (if set).</div>
       </>)}
       {section(isMultiLine ? "Active product" : "Quantity", <>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{activeLine.product.name}</div>
@@ -843,9 +856,9 @@ export const NewOrderSheet: React.FC<{
   // A click outside closes only an empty order; with any work in it, ask first.
   const handleBackdropClick = () => {
     const dirty = isEdit
-      ? JSON.stringify([draftLines, customerName, customerEmail, notes, isRush, isOnHold, shippingText]) !==
-        JSON.stringify([initial.lines, initial.customerName, initial.customerEmail, initial.notes, initial.isRush, initial.isOnHold, initial.shippingText])
-      : draftLines.length > 0 || customerName.trim() !== "" || notes.trim() !== "" || isRush || isOnHold;
+      ? JSON.stringify([draftLines, customerName, customerEmail, notes, isRush, isOnHold, shippingText, shipBy]) !==
+        JSON.stringify([initial.lines, initial.customerName, initial.customerEmail, initial.notes, initial.isRush, initial.isOnHold, initial.shippingText, initial.shipBy])
+      : draftLines.length > 0 || customerName.trim() !== "" || notes.trim() !== "" || isRush || isOnHold || shipBy !== "";
     if (!dirty) {
       onClose();
       return;
