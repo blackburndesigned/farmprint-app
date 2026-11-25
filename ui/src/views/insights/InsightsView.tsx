@@ -18,6 +18,7 @@ const NOTE_WAIT_WORK = "Estimate from Flow times: waiting = placed to first prin
 const NOTE_SCRAP = "Estimate: catalog part cost of failed prints only (no machine time, labor or filament weight).";
 const NOTE_MARGIN = "Estimate: line price minus catalog part cost, reprints and packaging. Shipping, machine time and labor aren't included.";
 const NOTE_CUSTOMERS = "Estimate: customers are matched by email, or by name when there's no email.";
+const NOTE_PROFIT = "Estimate: revenue minus catalog part cost, reprints, packaging and the order's shipping cost. Machine time and labor aren't included.";
 const NOTE_FILAMENT = "Estimate: catalog grams per part for each printed or failed print, at the filament's cost per kg.";
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${(v * 100).toFixed(1)}%`);
@@ -301,6 +302,18 @@ export const InsightsView: React.FC<{
             )}
           </Card>
 
+          <Card title="Parts in progress right now" note="Live: unfinished parts of open orders, by step." onCsv={() => void exportCsv("wip")}>
+            {d.wip.every((w) => w.count === 0) ? (
+              <Empty text="Nothing in progress" />
+            ) : (
+              <BarList
+                color={INS_COLORS[5]}
+                rows={d.wip.map((w) => ({ key: w.key, label: w.key, value: w.count, valueText: String(w.count) }))}
+                onClick={(r) => open("wip", `Parts ${r.label.toLowerCase()} now`, r.key)}
+              />
+            )}
+          </Card>
+
           <Card title="Bottleneck right now" note="Live: parts on each printer (staged or printing), and parts waiting by material. Open orders not on hold." onCsv={() => void exportCsv("bottleneck")}>
             {d.bottleneck.by_printer.length === 0 && d.bottleneck.by_material.length === 0 ? (
               <Empty text="Nothing waiting" />
@@ -420,6 +433,38 @@ export const InsightsView: React.FC<{
             )}
           </Card>
 
+          <Card title="Net profit" estimate note={[NOTE_PROFIT, packagingNote].filter(Boolean).join(" ")} onCsv={() => void exportCsv("net_profit")}>
+            {d.money.orders === 0 ? (
+              <Empty />
+            ) : (
+              <>
+                <div className="fp-ins-kv">
+                  <button type="button" onClick={() => open("net_profit", "Net profit by order")}>
+                    <span className="fp-ins-kv-k">Net profit</span>
+                    <span className="fp-ins-kv-v">{usd(d.profit.net_cents)}</span>
+                    <span className="fp-ins-kv-p">{d.profit.prev_net_cents === null ? "No previous" : `Previous ${usd(d.profit.prev_net_cents)}`}</span>
+                  </button>
+                  <button type="button" onClick={() => open("net_profit", "Net profit by order")}>
+                    <span className="fp-ins-kv-k">Margin</span>
+                    <span className="fp-ins-kv-v">{pct(d.profit.margin)}</span>
+                    <span className="fp-ins-kv-p">{d.profit.prev_margin === null ? "No previous" : `Previous ${pct(d.profit.prev_margin)}`}</span>
+                  </button>
+                </div>
+                <BarList
+                  color={INS_COLORS[4]}
+                  max={Math.max(1, d.profit.revenue_cents)}
+                  rows={[
+                    ["Parts cost (catalog)", d.profit.parts_cost_cents],
+                    ["Reprints", d.profit.reprint_cost_cents],
+                    ["Packaging", d.profit.packaging_cents],
+                    ["Shipping cost", d.profit.shipping_cost_cents],
+                  ].map(([label, v]) => ({ key: label as string, label: label as string, value: v as number, valueText: usd(v as number) }))}
+                  onClick={() => open("net_profit", "Net profit by order")}
+                />
+              </>
+            )}
+          </Card>
+
           <Card title="Gross margin by product" estimate note={[NOTE_MARGIN, packagingNote].filter(Boolean).join(" ")} onCsv={() => void exportCsv("products")}>
             {d.products.length === 0 ? (
               <Empty />
@@ -528,6 +573,9 @@ export const InsightsView: React.FC<{
               <>
                 <div className="fp-ins-kv-k">
                   Total {Math.round(d.filament.grams).toLocaleString()} g · {usd(d.filament.cost_cents)}
+                  {d.filament.failed_grams > 0
+                    ? ` · failed prints ${Math.round(d.filament.failed_grams).toLocaleString()} g · ${usd(d.filament.failed_cost_cents)}`
+                    : ""}
                 </div>
                 <div className="fp-ins-kv-k">By material</div>
                 <BarList

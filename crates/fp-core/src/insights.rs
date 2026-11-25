@@ -86,6 +86,8 @@ pub struct OrderRow {
     pub ship_by: Option<NaiveDate>,
     pub on_hold: bool,
     pub shipping_charged_cents: i64,
+    /// What shipping cost the shop (label), as entered on the order.
+    pub shipping_cost_cents: i64,
     pub lines: Vec<LineRow>,
 }
 
@@ -348,7 +350,7 @@ impl ShopLedger {
         {
             let mut st = conn.prepare(
                 "SELECT id, order_code, customer_name, customer_email, source, created_at, shipped_at, ship_by, is_on_hold,
-                        shipping_charged_cents, ship_status
+                        shipping_charged_cents, ship_status, shipping_cost_cents
                  FROM orders ORDER BY created_at",
             )?;
             let rows = st.query_map([], |r| {
@@ -369,6 +371,7 @@ impl ShopLedger {
                         r.get::<_, i64>(8)?,
                         r.get::<_, i64>(9)?,
                         r.get::<_, Option<String>>(10)?,
+                        r.get::<_, i64>(11)?,
                     ),
                 ))
             })?;
@@ -376,7 +379,7 @@ impl ShopLedger {
                 let (
                     (id, code, name, email),
                     (source, created, shipped_at, ship_by),
-                    (hold, ship_charged, ship_status),
+                    (hold, ship_charged, ship_status, ship_cost),
                 ) = r?;
                 let Some(created) = parse_ts(&created) else {
                     continue;
@@ -409,6 +412,7 @@ impl ShopLedger {
                         .and_then(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()),
                     on_hold: hold != 0,
                     shipping_charged_cents: ship_charged,
+                    shipping_cost_cents: ship_cost,
                     lines,
                 });
             }
@@ -730,6 +734,21 @@ pub struct Money {
     pub prev_aov_cents: Option<f64>,
 }
 
+/// Estimated net profit of the orders placed in the range (same parts as the order
+/// window's economics: catalog part cost, reprints, packaging setting, shipping cost).
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Profit {
+    pub revenue_cents: i64,
+    pub parts_cost_cents: i64,
+    pub reprint_cost_cents: i64,
+    pub packaging_cents: i64,
+    pub shipping_cost_cents: i64,
+    pub net_cents: i64,
+    pub margin: Option<f64>,
+    pub prev_net_cents: Option<i64>,
+    pub prev_margin: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct ProductRow {
     pub product: String,
@@ -780,6 +799,9 @@ pub struct FilamentUse {
 pub struct Filament {
     pub grams: f64,
     pub cost_cents: i64,
+    /// Part of `grams` / `cost_cents` that went into failed prints.
+    pub failed_grams: f64,
+    pub failed_cost_cents: i64,
     pub by_material: Vec<FilamentUse>,
     pub by_color: Vec<FilamentUse>,
 }
@@ -827,6 +849,9 @@ pub struct Insights {
     pub scrap_cost_cents: i64,
     pub prev_scrap_cost_cents: Option<i64>,
     pub money: Money,
+    pub profit: Profit,
+    /// Parts of open orders by state, right now (not limited to the range).
+    pub wip: Vec<CountRow>,
     pub products: Vec<ProductRow>,
     pub packaging_cost_set: bool,
     pub channels: Vec<ChannelRow>,
@@ -842,6 +867,16 @@ pub const NOTE_MARGIN: &str = "Estimate: line price minus catalog part cost, rep
 pub const NOTE_CUSTOMERS: &str =
     "Estimate: customers are matched by email, or by name when there's no email.";
 pub const NOTE_FILAMENT: &str = "Estimate: catalog grams per part for each printed or failed print, priced at the filament's cost per kg. Actual use (purges, supports) isn't measured.";
+pub const NOTE_PROFIT: &str = "Estimate: revenue minus catalog part cost, reprints, packaging and the order's shipping cost. Machine time and labor aren't included.";
+/// Order the work-in-progress states are listed in.
+pub const WIP_STATES: [&str; 6] = [
+    "Queued",
+    "Staged",
+    "Printing",
+    "Printed",
+    "Post-Processing",
+    "Ready",
+];
 pub const NOTE_PACKAGING_UNSET: &str = "Packaging cost not set (counted as 0).";
 
 // ---------------------------------------------------------------------------------------
@@ -1031,6 +1066,45 @@ impl<'a> Ctx<'a> {
             self.packaging() / o.lines.len() as i64
         };
         parts + pack
+    }
+    /// (parts, reprints, packaging, shipping cost) for one order, in cents.
+    fn order_costs(&self, o: &OrderRow) -> (i64, i64, i64, i64) {
+        let units = o.lines.iter().flat_map(|l| l.units.iter());
+        let parts: i64 = units.clone().map(|u| u.unit_cost_cents).sum();
+        let reprints: i64 = units.map(|u| u.unit_cost_cents * u.reprint_count).sum();
+        (parts, reprints, self.packaging(), o.shipping_cost_cents)
+    }
+    fn profit(&self, prev: bool) -> Profit {
+        let mut p = Profit::default();
+        for o in self.placed_orders(prev) {
+            let (a, b, c, d) = self.order_costs(o);
+            p.revenue_cents += o.revenue_cents();
+            p.parts_cost_cents += a;
+            p.reprint_cost_cents += b;
+            p.packaging_cents += c;
+            p.shipping_cost_cents += d;
+        }
+        p.net_cents = p.revenue_cents
+            - p.parts_cost_cents
+            - p.reprint_cost_cents
+            - p.packaging_cents
+            - p.shipping_cost_cents;
+        p.margin = (p.revenue_cents > 0).then(|| p.net_cents as f64 / p.revenue_cents as f64);
+        p
+    }
+    /// Unfinished parts of open orders, right now.
+    fn wip_units(&self) -> Vec<(&'a OrderRow, &'a LineRow, &'a UnitRow)> {
+        let mut out = Vec::new();
+        for o in self.data.orders.iter().filter(|o| o.is_open()) {
+            for l in &o.lines {
+                for u in &l.units {
+                    if !matches!(u.state.as_str(), "Shipped" | "Closed") {
+                        out.push((o, l, u));
+                    }
+                }
+            }
+        }
+        out
     }
     fn line_minutes(l: &LineRow) -> i64 {
         l.units
@@ -1409,6 +1483,28 @@ pub fn compute_insights(data: &InsightsData, q: &InsightsQuery, now: DateTime<Ut
             None
         },
     };
+    let mut profit = c.profit(false);
+    if has_prev {
+        let pp = c.profit(true);
+        profit.prev_net_cents = Some(pp.net_cents);
+        profit.prev_margin = pp.margin;
+    }
+    let mut wip_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for (_, _, u) in c.wip_units() {
+        *wip_counts.entry(u.state.clone()).or_default() += 1;
+    }
+    let mut wip: Vec<CountRow> = WIP_STATES
+        .iter()
+        .map(|s| CountRow {
+            key: s.to_string(),
+            count: wip_counts.remove(*s).unwrap_or(0),
+        })
+        .collect();
+    wip.extend(
+        wip_counts
+            .into_iter()
+            .map(|(key, count)| CountRow { key, count }),
+    );
     let mut prod: BTreeMap<String, ProductRow> = BTreeMap::new();
     for o in &placed {
         for l in &o.lines {
@@ -1512,13 +1608,17 @@ pub fn compute_insights(data: &InsightsData, q: &InsightsQuery, now: DateTime<Ut
     // Materials
     let mut fil_mat: BTreeMap<String, FilamentUse> = BTreeMap::new();
     let mut fil_col: BTreeMap<String, FilamentUse> = BTreeMap::new();
-    let (mut grams, mut fcost) = (0.0, 0.0);
+    let (mut grams, mut fcost, mut fgrams, mut ffcost) = (0.0, 0.0, 0.0, 0.0);
     for e in c.events_in(&["PrintedDone", "FailedPrint"], false) {
         let g = c.grams_of_event(e);
         let f = c.filament_of_event(e);
         let cost = f.map(|f| g / 1000.0 * f.cost_per_kg * 100.0).unwrap_or(0.0);
         grams += g;
         fcost += cost;
+        if e.kind == "FailedPrint" {
+            fgrams += g;
+            ffcost += cost;
+        }
         let mat = f
             .map(|f| f.material.clone())
             .unwrap_or_else(|| "Unknown".into());
@@ -1547,6 +1647,8 @@ pub fn compute_insights(data: &InsightsData, q: &InsightsQuery, now: DateTime<Ut
     let filament = Filament {
         grams,
         cost_cents: fcost.round() as i64,
+        failed_grams: fgrams,
+        failed_cost_cents: ffcost.round() as i64,
         by_material: sort_f(fil_mat),
         by_color: sort_f(fil_col),
     };
@@ -1640,6 +1742,22 @@ pub fn compute_insights(data: &InsightsData, q: &InsightsQuery, now: DateTime<Ut
             "up",
         ),
         Headline {
+            estimate: true,
+            note: Some(if packaging_cost_set {
+                NOTE_PROFIT.to_string()
+            } else {
+                format!("{NOTE_PROFIT} {NOTE_PACKAGING_UNSET}")
+            }),
+            ..h(
+                "net_profit",
+                "Net profit",
+                Some(profit.net_cents as f64),
+                profit.prev_net_cents.map(|v| v as f64),
+                "cents",
+                "up",
+            )
+        },
+        Headline {
             collecting_since: utilization.collecting_since.clone(),
             ..h(
                 "utilization",
@@ -1703,6 +1821,8 @@ pub fn compute_insights(data: &InsightsData, q: &InsightsQuery, now: DateTime<Ut
         scrap_cost_cents,
         prev_scrap_cost_cents,
         money,
+        profit,
+        wip,
         products,
         packaging_cost_set,
         channels,
@@ -1754,16 +1874,18 @@ fn pct(v: Option<f64>) -> String {
 }
 
 /// The CSV metrics, in export order.
-pub const CSV_METRICS: [&str; 16] = [
+pub const CSV_METRICS: [&str; 18] = [
     "lead_time",
     "on_time",
     "wait_work",
     "aging",
     "throughput",
+    "wip",
     "bottleneck",
     "yield",
     "failures",
     "revenue",
+    "net_profit",
     "channel",
     "products",
     "customers",
@@ -1956,6 +2078,91 @@ pub fn drilldown(
                         reason,
                         money(cost),
                         format!("{:.0}", c.grams_of_event(e)),
+                    ],
+                );
+            }
+            t
+        }
+        "wip" => {
+            let mut t = Table::new(
+                "Parts in progress now",
+                &[
+                    "Order",
+                    "Product",
+                    "Part",
+                    "State",
+                    "Printer",
+                    "Material",
+                    "Print minutes",
+                ],
+            );
+            for (o, l, u) in c.wip_units() {
+                if key.is_some_and(|k| k != u.state) {
+                    continue;
+                }
+                let printer = u
+                    .printer_id
+                    .as_deref()
+                    .map(|p| {
+                        c.printer_name
+                            .get(p)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| p.to_string())
+                    })
+                    .unwrap_or_default();
+                let material = c
+                    .filament_by_id
+                    .get(u.filament_id.as_str())
+                    .map(|f| f.material.clone())
+                    .unwrap_or_else(|| "Unknown".into());
+                t.push(
+                    Some(&o.id),
+                    vec![
+                        o.code.clone(),
+                        l.product_name.clone(),
+                        u.part_name.clone(),
+                        u.state.clone(),
+                        printer,
+                        material,
+                        u.print_minutes.to_string(),
+                    ],
+                );
+            }
+            t
+        }
+        "net_profit" | "profit" => {
+            let mut t = Table::new(
+                "Orders placed (net profit estimate)",
+                &[
+                    "Order",
+                    "Placed",
+                    "Customer",
+                    "Revenue",
+                    "Parts cost",
+                    "Reprints",
+                    "Packaging",
+                    "Shipping cost",
+                    "Net",
+                    "Margin",
+                ],
+            );
+            for o in c.placed_orders(false) {
+                let (a, b, p, d) = c.order_costs(o);
+                let rev = o.revenue_cents();
+                let net = rev - a - b - p - d;
+                t.push(
+                    Some(&o.id),
+                    vec![
+                        o.code.clone(),
+                        c.fmt_ts(o.created),
+                        o.customer_name.clone(),
+                        money(rev),
+                        money(a),
+                        money(b),
+                        money(p),
+                        money(d),
+                        money(net),
+                        pct((rev > 0).then(|| net as f64 / rev as f64)),
                     ],
                 );
             }
@@ -2316,6 +2523,65 @@ pub fn summary(ins: &Insights, metric: &str) -> Table {
             }
             t
         }
+        "wip" => {
+            let mut t = Table::new("Parts in progress now (open orders)", &["State", "Parts"]);
+            for r in &ins.wip {
+                t.push(None, vec![r.key.clone(), r.count.to_string()]);
+            }
+            t
+        }
+        "net_profit" | "profit" => {
+            let p = &ins.profit;
+            let mut t = Table::new(
+                "Net profit (estimate)",
+                &["Measure", "This period", "Previous period"],
+            );
+            t.push(
+                None,
+                vec!["Revenue".into(), money(p.revenue_cents), String::new()],
+            );
+            t.push(
+                None,
+                vec![
+                    "Parts cost (catalog)".into(),
+                    money(p.parts_cost_cents),
+                    String::new(),
+                ],
+            );
+            t.push(
+                None,
+                vec![
+                    "Reprints".into(),
+                    money(p.reprint_cost_cents),
+                    String::new(),
+                ],
+            );
+            t.push(
+                None,
+                vec!["Packaging".into(), money(p.packaging_cents), String::new()],
+            );
+            t.push(
+                None,
+                vec![
+                    "Shipping cost".into(),
+                    money(p.shipping_cost_cents),
+                    String::new(),
+                ],
+            );
+            t.push(
+                None,
+                vec![
+                    "Net profit".into(),
+                    money(p.net_cents),
+                    p.prev_net_cents.map(money).unwrap_or_default(),
+                ],
+            );
+            t.push(
+                None,
+                vec!["Margin".into(), pct(p.margin), pct(p.prev_margin)],
+            );
+            t
+        }
         "channel" => {
             let mut t = Table::new("Sales channels", &["Channel", "Orders", "Revenue"]);
             for r in &ins.channels {
@@ -2383,6 +2649,24 @@ pub fn summary(ins: &Insights, metric: &str) -> Table {
             let mut t = Table::new(
                 "Filament used (estimate)",
                 &["Group", "Name", "Grams", "Cost"],
+            );
+            t.push(
+                None,
+                vec![
+                    "Total".into(),
+                    "All prints".into(),
+                    format!("{:.0}", ins.filament.grams),
+                    money(ins.filament.cost_cents),
+                ],
+            );
+            t.push(
+                None,
+                vec![
+                    "Total".into(),
+                    "Failed prints".into(),
+                    format!("{:.0}", ins.filament.failed_grams),
+                    money(ins.filament.failed_cost_cents),
+                ],
             );
             for r in &ins.filament.by_material {
                 t.push(
@@ -2611,6 +2895,7 @@ mod tests {
             ship_by: None,
             on_hold: false,
             shipping_charged_cents: 0,
+            shipping_cost_cents: 0,
             lines: vec![LineRow {
                 product_id: "prod".into(),
                 product_name: "Product A".into(),
@@ -2896,7 +3181,7 @@ mod tests {
         assert!(data.tracking_since.is_some());
         // Insights over the seed runs end to end.
         let ins = l.insights(&InsightsQuery::default()).unwrap();
-        assert_eq!(ins.headline.len(), 10);
+        assert_eq!(ins.headline.len(), 11);
     }
 
     #[test]
@@ -3123,5 +3408,142 @@ mod tests {
         assert!(csv.contains("# Headline"));
         assert!(csv.contains("# Orders placed"));
         assert!(csv.contains("\r\n"));
+    }
+
+    #[test]
+    fn net_profit_estimate_and_compare() {
+        let mut d = base();
+        let mut u = unit("u1", "Shipped", 300);
+        u.reprint_count = 1;
+        let mut a = order(
+            "a",
+            "2026-11-11T00:00:00Z",
+            Some("2026-11-12T00:00:00Z"),
+            1000,
+            vec![u],
+        );
+        a.shipping_charged_cents = 500;
+        a.shipping_cost_cents = 400;
+        let p = order(
+            "p",
+            "2026-11-02T00:00:00Z",
+            None,
+            800,
+            vec![unit("u2", "Queued", 200)],
+        );
+        d.orders = vec![a, p];
+        let rq = q("2026-11-10T00:00:00Z", "2026-11-20T00:00:00Z");
+        let ins = compute_insights(&d, &rq, now());
+        let pr = &ins.profit;
+        // 1500 revenue - 300 parts - 300 reprint - 0 packaging (not set) - 400 shipping.
+        assert_eq!(
+            (pr.revenue_cents, pr.parts_cost_cents, pr.reprint_cost_cents),
+            (1500, 300, 300)
+        );
+        assert_eq!(
+            (pr.packaging_cents, pr.shipping_cost_cents, pr.net_cents),
+            (0, 400, 500)
+        );
+        assert!((pr.margin.unwrap() - 500.0 / 1500.0).abs() < 1e-9);
+        assert_eq!(pr.prev_net_cents, Some(600));
+        let h = ins.headline.iter().find(|h| h.id == "net_profit").unwrap();
+        assert!(h.estimate && h.note.as_deref().unwrap().contains(NOTE_PACKAGING_UNSET));
+        assert_eq!((h.value, h.previous), (Some(500.0), Some(600.0)));
+        d.packaging_cost_cents = Some(100);
+        let ins = compute_insights(&d, &rq, now());
+        assert_eq!(
+            (ins.profit.packaging_cents, ins.profit.net_cents),
+            (100, 400)
+        );
+        // No orders: zero revenue, no margin; all time has no previous.
+        let empty = compute_insights(&base(), &rq, now());
+        assert_eq!((empty.profit.net_cents, empty.profit.margin), (0, None));
+        assert_eq!(
+            compute_insights(&d, &InsightsQuery::default(), now())
+                .profit
+                .prev_net_cents,
+            None
+        );
+        let t = drilldown(&d, &rq, now(), "net_profit", None);
+        assert_eq!(t.order_ids, vec![Some("a".to_string())]);
+        assert_eq!(t.rows[0][8], "4.00");
+    }
+
+    #[test]
+    fn wip_counts_unfinished_parts_of_open_orders() {
+        let mut d = base();
+        d.orders = vec![
+            order(
+                "a",
+                "2026-11-11T00:00:00Z",
+                None,
+                100,
+                vec![
+                    unit("u1", "Queued", 1),
+                    unit("u2", "Printing", 1),
+                    unit("u3", "Ready", 1),
+                ],
+            ),
+            order(
+                "b",
+                "2026-10-01T00:00:00Z",
+                None,
+                100,
+                vec![unit("u4", "Queued", 1), unit("u5", "Post-Processing", 1)],
+            ),
+            order(
+                "c",
+                "2026-11-11T00:00:00Z",
+                Some("2026-11-12T00:00:00Z"),
+                100,
+                vec![unit("u6", "Shipped", 1)],
+            ),
+        ];
+        // Live, so the range doesn't matter.
+        let ins = compute_insights(
+            &d,
+            &q("2026-11-18T00:00:00Z", "2026-11-20T00:00:00Z"),
+            now(),
+        );
+        let got: Vec<(&str, usize)> = ins.wip.iter().map(|r| (r.key.as_str(), r.count)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Queued", 2),
+                ("Staged", 0),
+                ("Printing", 1),
+                ("Printed", 0),
+                ("Post-Processing", 1),
+                ("Ready", 1)
+            ]
+        );
+        let t = drilldown(&d, &InsightsQuery::default(), now(), "wip", Some("Queued"));
+        assert_eq!(t.rows.len(), 2);
+        assert!(
+            insights_csv(&d, &InsightsQuery::default(), now(), Some("wip"))
+                .contains("Parts in progress now")
+        );
+    }
+
+    #[test]
+    fn filament_splits_failed_prints() {
+        let mut d = base();
+        d.events = vec![
+            ev("FailedPrint", "2026-11-11T00:00:00Z", "a", "u1"),
+            ev("PrintedDone", "2026-11-11T05:00:00Z", "a", "u1"),
+        ];
+        let ins = compute_insights(
+            &d,
+            &q("2026-11-10T00:00:00Z", "2026-11-20T00:00:00Z"),
+            now(),
+        );
+        assert_eq!(
+            (ins.filament.grams, ins.filament.failed_grams),
+            (100.0, 50.0)
+        );
+        assert_eq!(
+            (ins.filament.cost_cents, ins.filament.failed_cost_cents),
+            (200, 100)
+        );
     }
 }

@@ -677,8 +677,6 @@ impl ShopLedger {
         insights::record_printer_statuses(&self.conn, &printers)?;
         let overstock = self.load_overstock(&filament_map, &product_map, &part_map)?;
         let flow_events = self.load_flow_events()?;
-        let analytics =
-            Self::compute_analytics(&orders, &all_units, &printers, &flow_events, &filament_map);
 
         Ok(ShopSnapshot {
             filaments,
@@ -687,7 +685,6 @@ impl ShopLedger {
             orders,
             overstock,
             flow_events,
-            analytics,
         })
     }
 
@@ -2759,158 +2756,6 @@ impl ShopLedger {
         Ok(rows)
     }
 
-    fn compute_analytics(
-        orders: &[Order],
-        units: &[PartUnit],
-        printers: &[Printer],
-        flow_events: &[FlowEvent],
-        filament_map: &HashMap<String, FilamentSwatch>,
-    ) -> AnalyticsSummary {
-        let total_orders = orders.len();
-        let ready_to_ship_orders = orders.iter().filter(|o| o.overall_state == "Ready").count();
-        let at_risk_orders = orders
-            .iter()
-            .filter(|o| o.ship_by_status == "At Risk")
-            .count();
-        let active_orders = orders
-            .iter()
-            .filter(|o| o.overall_state != "Shipped" && !o.is_on_hold)
-            .count();
-
-        let count_state = |s: &str| units.iter().filter(|u| u.state == s).count();
-        let units_queued = count_state("Queued");
-        let units_staged = count_state("Staged");
-        let units_printing = count_state("Printing");
-        let units_printed = count_state("Printed");
-        let units_post_processing = count_state("Post-Processing");
-        let units_ready = count_state("Ready");
-
-        let total_revenue_cents: i64 = orders.iter().map(|o| o.total_revenue_cents).sum();
-        let total_material_cost_cents: i64 = units
-            .iter()
-            .map(|u| (u.unit_cost * 100.0).round() as i64)
-            .sum();
-        // Undone actions (e.g. a "Mark Failed" that was undone) don't count.
-        let total_reprint_loss_cents: i64 = flow_events
-            .iter()
-            .filter(|e| !e.undone)
-            .map(|e| e.cost_impact_cents)
-            .sum();
-        let total_reprint_grams: f64 = units
-            .iter()
-            .map(|u| u.grams * (u.reprint_count as f64))
-            .sum();
-        let total_net_profit_cents: i64 = orders.iter().map(|o| o.net_profit_cents).sum();
-
-        let average_margin_pct = if total_revenue_cents > 0 {
-            ((total_net_profit_cents as f64 / total_revenue_cents as f64) * 100.0).round()
-        } else {
-            0.0
-        };
-
-        let fleet_utilization_pct = if printers.is_empty() {
-            0.0
-        } else {
-            (printers.iter().map(|p| p.utilization_pct).sum::<f64>() / printers.len() as f64)
-                .round()
-        };
-
-        let remaining_mins: i64 = units
-            .iter()
-            .filter(|u| u.state == "Queued" || u.state == "Staged" || u.state == "Printing")
-            .map(|u| u.print_minutes)
-            .sum();
-        let active_printer_count = printers.len().max(1) as f64;
-        let estimated_queue_hours =
-            ((remaining_mins as f64 / 60.0) / active_printer_count * 10.0).round() / 10.0;
-
-        let failed_count = flow_events
-            .iter()
-            .filter(|e| e.kind == "FailedPrint" && !e.undone)
-            .count();
-        let total_prints = units.len().max(1);
-        let first_pass_yield_pct =
-            (((total_prints.saturating_sub(failed_count)) as f64 / total_prints as f64) * 100.0)
-                .round();
-
-        let mut reason_map: HashMap<String, (usize, i64)> = HashMap::new();
-        for ev in flow_events
-            .iter()
-            .filter(|e| e.kind == "FailedPrint" && !e.undone)
-        {
-            let reason = ev
-                .failure_reason
-                .clone()
-                .unwrap_or_else(|| "other".to_string());
-            let entry = reason_map.entry(reason).or_insert((0, 0));
-            entry.0 += 1;
-            entry.1 += ev.cost_impact_cents;
-        }
-        let failure_by_reason = reason_map
-            .into_iter()
-            .map(|(r, (c, loss))| (r, c, loss))
-            .collect();
-
-        let mut by_fil: HashMap<String, (usize, std::collections::HashSet<String>, i64)> =
-            HashMap::new();
-        for u in units.iter().filter(|u| u.state == "Queued") {
-            let entry = by_fil.entry(u.filament_id.clone()).or_default();
-            entry.0 += 1;
-            entry.1.insert(u.order_id.clone());
-            entry.2 += u.print_minutes;
-        }
-        let mut bottlenecks: Vec<BottleneckCallout> = Vec::new();
-        for (fid, (cnt, ords, mins)) in by_fil {
-            if cnt >= 2 {
-                if let Some(fil) = filament_map.get(&fid) {
-                    let hrs = ((mins as f64 / 60.0) * 10.0).round() / 10.0;
-                    bottlenecks.push(BottleneckCallout {
-                        filament_id: fid,
-                        filament_name: fil.name.clone(),
-                        filament_hex: fil.hex.clone(),
-                        material: fil.material.clone(),
-                        blocked_units: cnt,
-                        affected_orders: ords.len(),
-                        blocked_hours: hrs,
-                        recommendation: format!(
-                            "{} parts across {} order(s) waiting on {} {} — stage batch plate to clear {:.1} hrs",
-                            cnt,
-                            ords.len(),
-                            fil.name,
-                            fil.material,
-                            hrs
-                        ),
-                    });
-                }
-            }
-        }
-        bottlenecks.sort_by_key(|b| std::cmp::Reverse(b.blocked_units));
-
-        AnalyticsSummary {
-            total_orders,
-            active_orders,
-            ready_to_ship_orders,
-            at_risk_orders,
-            units_queued,
-            units_staged,
-            units_printing,
-            units_printed,
-            units_post_processing,
-            units_ready,
-            total_revenue_cents,
-            total_material_cost_cents,
-            total_reprint_loss_cents,
-            total_reprint_grams,
-            total_net_profit_cents,
-            average_margin_pct,
-            fleet_utilization_pct,
-            estimated_queue_hours,
-            first_pass_yield_pct,
-            failure_by_reason,
-            bottlenecks,
-        }
-    }
-
     /// Sets or clears (`""`) an order's optional ship-by date (`YYYY-MM-DD`).
     pub fn set_order_ship_by(&mut self, order_id: &str, ship_by: &str) -> CoreResult<()> {
         self.conn.execute(
@@ -3996,7 +3841,13 @@ mod tests {
         let snap = ledger
             .transition_units(tr(&["unit-demo-1-base"], "Failed", None, Some("Spaghetti")))
             .unwrap();
-        assert!(snap.analytics.total_reprint_loss_cents > 0);
+        let loss = |evs: &[FlowEvent]| {
+            evs.iter()
+                .filter(|e| !e.undone)
+                .map(|e| e.cost_impact_cents)
+                .sum::<i64>()
+        };
+        assert!(loss(&snap.flow_events) > 0);
         let u = unit(&ledger, "unit-demo-1-base").unwrap();
         assert_eq!((u.state.as_str(), u.reprint_count), ("Queued", 1));
 
@@ -4011,7 +3862,7 @@ mod tests {
         assert_eq!(u.state, "Printing");
         assert_eq!(u.printer_id.as_deref(), Some("prn-demo-2"));
         assert_eq!(u.reprint_count, 0);
-        assert_eq!(after.analytics.total_reprint_loss_cents, 0);
+        assert_eq!(loss(&after.flow_events), 0);
     }
 
     #[test]

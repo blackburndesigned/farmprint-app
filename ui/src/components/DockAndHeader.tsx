@@ -3,12 +3,13 @@ import "../index.css";
 import { BrandLogo } from "./BrandLogo";
 import { shortcut } from "../platform";
 import { isTypingTarget } from "../uiFeedback";
-import { Archive, Box, ChartColumn, Check, CircleDollarSign, CircleUser, ClipboardList, History, LayoutGrid, Printer, Repeat, Settings, Siren, Truck, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Archive, Box, ChartColumn, Check, CircleUser, ClipboardList, History, LayoutGrid, Printer, Repeat, Settings, Siren, Truck, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Icon } from "../icons";
+import { normalizeTab } from "./tabRedirects";
 
 export type DockTab =
   | "orders" | "andon" | "printers" | "parts" | "overstock"
-  | "flow" | "products" | "ready" | "history" | "value"
+  | "flow" | "products" | "ready" | "history"
   | "insights" | "people" | "settings" | "go";
 
 export interface DockTabSpec {
@@ -29,8 +30,7 @@ export const DOCK_TABS: DockTabSpec[] = [
   { id: "products", icon: Box, label: "Products", shortcut: shortcut("7") },
   { id: "ready", icon: Truck, label: "Ready to Ship", shortcut: shortcut("8") },
   { id: "history", icon: History, label: "History", shortcut: shortcut("9") },
-  { id: "value", icon: CircleDollarSign, label: "Production Value", shortcut: shortcut("0") },
-  { id: "insights", icon: ChartColumn, label: "Insights" },
+  { id: "insights", icon: ChartColumn, label: "Insights", shortcut: shortcut("0") },
   { id: "people", icon: CircleUser, label: "People", shortcut: shortcut("P", true) },
 ];
 
@@ -120,7 +120,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   const isWall = propWall !== undefined ? propWall : localWall;
   const wallSize = controlledSize ?? localSize;
   const switchTab = (tab: DockTab) =>
-    onTabChange ? onTabChange(tab) : chromeBridge.tabChange?.(tab);
+    onTabChange ? onTabChange(normalizeTab(tab)) : chromeBridge.tabChange?.(normalizeTab(tab));
 
   const applyWallMode = (next: boolean) => {
     setLocalWall(next);

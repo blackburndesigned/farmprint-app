@@ -47,11 +47,17 @@ export interface Insights {
   scrap_cost_cents: number;
   prev_scrap_cost_cents: number | null;
   money: { revenue_cents: number; orders: number; aov_cents: number | null; prev_revenue_cents: number | null; prev_orders: number | null; prev_aov_cents: number | null };
+  profit: {
+    revenue_cents: number; parts_cost_cents: number; reprint_cost_cents: number; packaging_cents: number;
+    shipping_cost_cents: number; net_cents: number; margin: number | null; prev_net_cents: number | null; prev_margin: number | null;
+  };
+  /** Parts of open orders by state, right now. */
+  wip: CountRow[];
   products: ProductRow[];
   packaging_cost_set: boolean;
   channels: ChannelRow[];
   customers: { customers: number; repeat_customers: number; repeat_rate: number | null; prev_repeat_rate: number | null; median_days_between_orders: number | null; top: CustomerRow[] };
-  filament: { grams: number; cost_cents: number; by_material: FilamentUse[]; by_color: FilamentUse[] };
+  filament: { grams: number; cost_cents: number; failed_grams: number; failed_cost_cents: number; by_material: FilamentUse[]; by_color: FilamentUse[] };
   utilization: { rate: number | null; prev_rate: number | null; by_printer: PrinterUse[]; collecting_since: string | null };
 }
 

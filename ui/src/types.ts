@@ -258,41 +258,6 @@ export interface FlowEvent {
 
 export type TransitionEvent = FlowEvent;
 
-export interface BottleneckCallout {
-  filament_id: string;
-  filament_name: string;
-  filament_hex: string;
-  material: string;
-  blocked_units: number;
-  affected_orders: number;
-  blocked_hours: number;
-  recommendation: string;
-}
-
-export interface AnalyticsSummary {
-  total_orders: number;
-  active_orders: number;
-  ready_to_ship_orders: number;
-  at_risk_orders: number;
-  units_queued: number;
-  units_staged: number;
-  units_printing: number;
-  units_printed: number;
-  units_post_processing: number;
-  units_ready: number;
-  total_revenue_cents: number;
-  total_material_cost_cents: number;
-  total_reprint_loss_cents: number;
-  total_reprint_grams: number;
-  total_net_profit_cents: number;
-  average_margin_pct: number;
-  fleet_utilization_pct: number;
-  estimated_queue_hours: number;
-  first_pass_yield_pct: number;
-  failure_by_reason: Array<[string, number, number]>;
-  bottlenecks: BottleneckCallout[];
-}
-
 export interface ShippingBoxPreset {
   id: string;
   name: string;
@@ -496,7 +461,6 @@ export interface ShopSnapshot {
   orders: Order[];
   overstock: OverstockItem[];
   flow_events: FlowEvent[];
-  analytics: AnalyticsSummary;
 }
 
 export interface TransitionRequest {

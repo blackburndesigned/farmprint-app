@@ -38,7 +38,6 @@ import {
 import {
   FlowView,
   HistoryView,
-  ProductionValueView,
 } from "./views/FlowAnalyticsViews";
 import { saveOrderLineThumb, useOrderThumbAutoRender } from "./orderLineThumbs";
 import { clearOrderModelCache } from "./components/orderModelCache";
@@ -927,14 +926,6 @@ export default function App() {
             orders={snapshot.orders}
             products={snapshot.products}
             onSelectOrder={(id) => setSelectedOrderId(id)}
-          />
-        )}
-
-        {activeTab === "value" && (
-          <ProductionValueView
-            analytics={snapshot.analytics}
-            orders={snapshot.orders}
-            snapshot={snapshot}
           />
         )}
 
