@@ -8,7 +8,8 @@
  * colors and camera, so each order gets its own picture.
  *
  * Exports
- *  - <OrderViewport3D>      live viewport (New Order sheet); ref → capture()/getCamera()/resetView()
+ *  - <OrderViewport3D>      live viewport (New Order / Edit Order); ref → capture()/getCamera()/resetView()
+ *                           optional `inscription` draws preview-only letters on the model
  *  - renderOrderThumbnail() offscreen render for orders with no hand-turned view
  *                           (website orders, other lines, burst orders); camera defaults to the
  *                           product's picture angle
@@ -26,6 +27,7 @@ import { loadProductEditorDraft } from "../productEditorSource";
 import { isPictureOnlyCatalogPart } from "../previewColors";
 import type { FilamentSwatch, Product } from "../types";
 import { cameraFromJson, isVec3, modelCache, modelGeneration, subscribeModelGeneration } from "./orderModelCache";
+import { buildInscriptionPreviewMesh, inscriptionFromSaved } from "../inscriptionPreview";
 
 // ---------------------------------------------------------------------------------------
 // Types saved per order line (local app data only)
@@ -72,6 +74,9 @@ export interface OrderModel {
   lights: { key: number; fill: number; ambient: number };
   /** Visible parts without a saved mesh (older imports) — 3D is not usable. */
   missingMeshes: string[];
+  /** Saved inscription setup from editor.json (placement, font, size, flips, wrap). */
+  inscription: ReturnType<typeof inscriptionFromSaved>;
+  supportsCustomText: boolean;
 }
 
 const cloneCam = cloneCamera;
@@ -111,12 +116,15 @@ export function loadOrderModel(product: Product, filaments: FilamentSwatch[]): P
     const saved = cameraFromJson((draft as any).viewCamera);
     const preset: FramingPreset = draft.cameraPreset === "Front" ? "front" : draft.cameraPreset === "Top" ? "top" : "threeQuarter";
     const base = saved ? { ...saved, light: saved.light || light } : cameraForPreset(preset, true, { ...defaultCamera(), light });
+    const inscription = inscriptionFromSaved(draft.inscription);
     return {
       productId: product.id,
       parts,
       defaultCamera: fitted(base),
       lights: { key: sl?.key ?? 900, fill: sl?.fill ?? 350, ambient: sl?.ambient ?? 280 },
       missingMeshes: parts.filter((p) => p.visible && p.indices.length < 3).map((p) => p.name),
+      inscription,
+      supportsCustomText: !!(product.supports_custom_text || inscription.enabled),
     };
   })();
   modelCache.set(key, job);
@@ -371,6 +379,12 @@ export interface OrderViewport3DProps {
   fallback?: React.ReactNode;
   /** Told whether the live 3D view is showing (false = fallback). */
   onAvailableChange?: (available: boolean) => void;
+  /**
+   * Preview-only inscription text for this order line (`activeLine.customText`).
+   * Empty or omitted draws nothing. Letters use the product's saved placement
+   * (editor.json) and are never included in Print! or exported .3mf files.
+   */
+  inscription?: string | null;
 }
 
 export const OrderViewport3D = forwardRef<OrderViewport3DHandle, OrderViewport3DProps>(function OrderViewport3D(props, ref) {
@@ -418,20 +432,46 @@ export const OrderViewport3D = forwardRef<OrderViewport3DHandle, OrderViewport3D
   }, [usable, startCamera]);
 
   const colorKey = model ? model.parts.map((p) => props.partColors[p.id] || p.defaultHex).join(",") : "";
-  const layers: StudioPartLayer[] = useMemo(
-    () =>
-      (model?.parts || []).map((p) => ({
-        id: p.id,
-        name: p.name,
-        filamentName: "",
-        filamentHex: props.partColors[p.id] || p.defaultHex,
-        visible: p.visible,
-        meshPositions: p.positions,
-        meshIndices: p.indices,
-      })),
+  const inscriptionText = props.inscription ?? "";
+  const preview = useMemo(() => {
+    if (!model) return null;
+    return buildInscriptionPreviewMesh({
+      text: inscriptionText,
+      config: model.inscription,
+      supportsCustomText: model.supportsCustomText,
+      parts: model.parts,
+      camera: model.defaultCamera,
+      partColors: props.partColors,
+      defaultHexes: Object.fromEntries(model.parts.map((p) => [p.id, p.defaultHex])),
+    });
+    // Colors and text are the only live inputs; placement is from the product default angle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [model, colorKey]
-  );
+  }, [model, inscriptionText, colorKey]);
+  const layers: StudioPartLayer[] = useMemo(() => {
+    const list: StudioPartLayer[] = (model?.parts || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      filamentName: "",
+      filamentHex: props.partColors[p.id] || p.defaultHex,
+      visible: p.visible,
+      meshPositions: p.positions,
+      meshIndices: p.indices,
+    }));
+    if (preview?.mesh) {
+      list.push({
+        id: preview.mesh.id,
+        name: preview.mesh.name,
+        filamentName: "",
+        filamentHex: preview.mesh.hex,
+        visible: true,
+        meshPositions: preview.mesh.positions,
+        meshIndices: preview.mesh.indices,
+        pickIgnore: true,
+      });
+    }
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, colorKey, preview]);
   const pickableIds = useMemo(() => (model?.parts || []).filter((p) => p.selectable).map((p) => p.id), [model]);
   const selectedIds = useMemo(() => props.selectedPartIds || [], [(props.selectedPartIds || []).join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -206,7 +206,7 @@ export const ThumbnailViewport = forwardRef<ThumbnailViewportHandle, ThumbnailVi
       renderSquareCanvas(size, undefined, undefined, () => "#000000")?.getContext("2d")?.getImageData(0, 0, size, size) || null;
     const layerParts = (ids?: string[]) =>
       propsRef.current.parts.filter(
-        (part) => part.visible && part.meshPositions && part.meshIndices && part.meshIndices.length >= 3 && (!ids || ids.includes(part.id))
+        (part) => part.visible && !part.pickIgnore && part.meshPositions && part.meshIndices && part.meshIndices.length >= 3 && (!ids || ids.includes(part.id))
       );
 
     useImperativeHandle(ref, () => ({
@@ -256,7 +256,7 @@ export const ThumbnailViewport = forwardRef<ThumbnailViewportHandle, ThumbnailVi
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
       const live = propsRef.current;
-      const visible = live.parts.filter((part) => part.visible && part.meshPositions && part.meshIndices && part.meshIndices.length >= 3);
+      const visible = live.parts.filter((part) => part.visible && !part.pickIgnore && part.meshPositions && part.meshIndices && part.meshIndices.length >= 3);
       const hit = pickPartAt({
         x: clientX - rect.left,
         y: clientY - rect.top,

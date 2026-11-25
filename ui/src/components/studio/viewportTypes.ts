@@ -32,6 +32,8 @@ export interface StudioPartLayer {
   offsetMm?: [number, number, number];
   meshPositions?: number[];
   meshIndices?: number[];
+  /** When true, the part is drawn but ignored by click-picking and by captureLayers. */
+  pickIgnore?: boolean;
 }
 
 export type ViewportBackdrop = "default" | "checker" | "dark" | "midGray" | "light";
