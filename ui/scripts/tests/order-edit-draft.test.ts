@@ -59,6 +59,11 @@ check(p2.lines[0].quantity === 3, "new quantity");
 check(p2.lines[1].line_id === null && Object.keys(p2.lines[1].part_filaments).length === 2, "new line sends every color");
 check(p2.shipping_charged_cents === null && p2.confirm_started, "blank shipping keeps the charge; confirmation passed on");
 
+check(same.ship_by === null, "no ship-by in details keeps the current one");
+const p3 = orderEditPayload(order, drafts, { customerName: "Sam", customerEmail: "", notes: "", isRush: false, isOnHold: false, shippingText: "", shipBy: "2026-12-01" });
+const p4 = orderEditPayload(order, drafts, { customerName: "Sam", customerEmail: "", notes: "", isRush: false, isOnHold: false, shippingText: "", shipBy: "" });
+check(p3.ship_by === "2026-12-01" && p4.ship_by === "", "ship-by date sent; blank clears it");
+
 check(shippingCents("") === null && shippingCents("$5") === 500 && shippingCents("5.5") === 550 && Number.isNaN(shippingCents("abc")), "shipping text");
 
 const started = startedByPart(order, "l1");

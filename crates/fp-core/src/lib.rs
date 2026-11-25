@@ -2,6 +2,7 @@ pub mod applock;
 pub mod clearance;
 pub mod delta;
 pub mod feeders;
+pub mod insights;
 pub mod models;
 pub mod order_edit;
 pub mod print_areas;
@@ -673,6 +674,7 @@ impl ShopLedger {
             })
             .collect::<Vec<_>>();
 
+        insights::record_printer_statuses(&self.conn, &printers)?;
         let overstock = self.load_overstock(&filament_map, &product_map, &part_map)?;
         let flow_events = self.load_flow_events()?;
         let analytics =
@@ -2367,10 +2369,11 @@ impl ShopLedger {
 
         let mut order_stmt = self.conn.prepare(
             "SELECT id, order_code, customer_name, customer_email, source, is_rush, is_on_hold, notes, shipping_charged_cents, shipping_cost_cents, created_at, updated_at,
-                    ship_status, packed_at, shipped_at, tracking_number, box_preset_id, remote_id
+                    ship_status, packed_at, shipped_at, tracking_number, box_preset_id, remote_id, ship_by
              FROM orders ORDER BY is_rush DESC, created_at ASC",
         )?;
         let mut running_queue_mins: i64 = 0;
+        let packaging_cost_cents = self.get_settings()?.packaging_cost_cents;
 
         // Group once (rows keep their ORDER BY id order) so assembling every order is
         // O(orders + lines + units) instead of scanning every line/unit per order.
@@ -2596,10 +2599,10 @@ impl ShopLedger {
                     .iter()
                     .map(|u| ((u.unit_cost * 100.0).round() as i64) * u.reprint_count)
                     .sum();
-                let box_cost_cents = 65;
+                // Packaging is the shop's setting; blank counts as 0 (no built-in cost).
                 let estimated_cost_cents = base_parts_cost_cents
                     + reprint_loss_cents
-                    + box_cost_cents
+                    + packaging_cost_cents.unwrap_or(0)
                     + shipping_cost_cents;
                 let net_profit_cents = total_revenue_cents - estimated_cost_cents;
                 let margin_pct = if total_revenue_cents > 0 {
@@ -2650,6 +2653,8 @@ impl ShopLedger {
                     margin_pct,
                     has_margin_warning,
                     margin_warning_note,
+                    ship_by: r.get(18)?,
+                    packaging_cost_set: packaging_cost_cents.is_some(),
                     ship: OrderShipFields {
                         ship_status: r
                             .get::<_, Option<String>>(12)?
@@ -2904,6 +2909,19 @@ impl ShopLedger {
             failure_by_reason,
             bottlenecks,
         }
+    }
+
+    /// Sets or clears (`""`) an order's optional ship-by date (`YYYY-MM-DD`).
+    pub fn set_order_ship_by(&mut self, order_id: &str, ship_by: &str) -> CoreResult<()> {
+        self.conn.execute(
+            "UPDATE orders SET ship_by = ?1, updated_at = ?2 WHERE id = ?3",
+            params![
+                normalize_ship_by(ship_by)?,
+                Utc::now().to_rfc3339(),
+                order_id
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn update_order_metadata(
@@ -3347,6 +3365,21 @@ fn existing_filament_column(
             .collect::<Result<Vec<_>, _>>()?
     };
     Ok(rows)
+}
+
+/// Ship-by input: "" = none, else must be a `YYYY-MM-DD` date.
+pub fn normalize_ship_by(s: &str) -> CoreResult<Option<String>> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map(|d| Some(d.format("%Y-%m-%d").to_string()))
+        .map_err(|_| {
+            CoreError::Validation(format!(
+                "Ship-by date must look like 2026-12-31 (got {s:?})."
+            ))
+        })
 }
 
 #[cfg(test)]

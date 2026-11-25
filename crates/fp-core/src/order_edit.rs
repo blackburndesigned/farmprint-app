@@ -58,6 +58,9 @@ pub struct OrderEditInput {
     /// None keeps the current shipping charge.
     #[serde(default)]
     pub shipping_charged_cents: Option<i64>,
+    /// Ship-by date `YYYY-MM-DD`. None keeps the current one; "" clears it.
+    #[serde(default)]
+    pub ship_by: Option<String>,
     pub lines: Vec<OrderEditLine>,
     /// The user agreed to remove parts that are staged, printing, printed or later.
     #[serde(default)]
@@ -494,6 +497,12 @@ impl ShopLedger {
                 input.order_id
             ],
         )?;
+        if let Some(sb) = &input.ship_by {
+            tx.execute(
+                "UPDATE orders SET ship_by = ?1 WHERE id = ?2",
+                params![crate::normalize_ship_by(sb)?, input.order_id],
+            )?;
+        }
         let ev = EventCtx {
             tx: &tx,
             now: &now,
@@ -840,6 +849,7 @@ mod tests {
             is_rush: false,
             is_on_hold: false,
             shipping_charged_cents: None,
+            ship_by: None,
             lines: vec![line],
             confirm_started: false,
             actor_device: Some("Test".into()),
@@ -1090,6 +1100,7 @@ mod tests {
         inp.notes = "Gift wrap".into();
         inp.is_rush = true;
         inp.shipping_charged_cents = Some(599);
+        inp.ship_by = Some("2026-12-01".into());
         let plan = l.plan_order_edit(&inp).unwrap();
         assert!(plan
             .warnings
@@ -1107,6 +1118,7 @@ mod tests {
         assert_eq!(o.notes, "Gift wrap");
         assert!(o.is_rush);
         assert_eq!(o.shipping_charged_cents, 599);
+        assert_eq!(o.ship_by.as_deref(), Some("2026-12-01"));
         assert_eq!(o.lines[0].custom_text.as_deref(), Some("Ada"));
         let (source, remote): (String, Option<String>) = l
             .conn

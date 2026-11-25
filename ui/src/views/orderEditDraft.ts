@@ -85,6 +85,8 @@ export interface OrderEditDetails {
   isOnHold: boolean;
   /** Dollars as typed; blank keeps the current charge. */
   shippingText: string;
+  /** Ship-by date YYYY-MM-DD; "" clears it; undefined keeps the current one. */
+  shipBy?: string;
 }
 
 /** Shipping text ("5.99", "$5", "") to cents; null when blank, NaN when not a number. */
@@ -111,6 +113,7 @@ export function orderEditPayload(
     is_rush: d.isRush,
     is_on_hold: d.isOnHold,
     shipping_charged_cents: ship === null || Number.isNaN(ship) ? null : ship,
+    ship_by: d.shipBy === undefined ? null : d.shipBy.trim(),
     confirm_started: confirmStarted,
     actor_device: "Orders · Edit Order",
     lines: lines.map((l) => {

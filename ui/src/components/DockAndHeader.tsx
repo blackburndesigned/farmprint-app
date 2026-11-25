@@ -3,13 +3,13 @@ import "../index.css";
 import { BrandLogo } from "./BrandLogo";
 import { shortcut } from "../platform";
 import { isTypingTarget } from "../uiFeedback";
-import { Archive, Box, Check, CircleDollarSign, CircleUser, ClipboardList, History, LayoutGrid, Printer, Repeat, Settings, Siren, Truck, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Archive, Box, ChartColumn, Check, CircleDollarSign, CircleUser, ClipboardList, History, LayoutGrid, Printer, Repeat, Settings, Siren, Truck, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Icon } from "../icons";
 
 export type DockTab =
   | "orders" | "andon" | "printers" | "parts" | "overstock"
   | "flow" | "products" | "ready" | "history" | "value"
-  | "people" | "settings" | "go";
+  | "insights" | "people" | "settings" | "go";
 
 export interface DockTabSpec {
   id: DockTab;
@@ -30,6 +30,7 @@ export const DOCK_TABS: DockTabSpec[] = [
   { id: "ready", icon: Truck, label: "Ready to Ship", shortcut: shortcut("8") },
   { id: "history", icon: History, label: "History", shortcut: shortcut("9") },
   { id: "value", icon: CircleDollarSign, label: "Production Value", shortcut: shortcut("0") },
+  { id: "insights", icon: ChartColumn, label: "Insights" },
   { id: "people", icon: CircleUser, label: "People", shortcut: shortcut("P", true) },
 ];
 

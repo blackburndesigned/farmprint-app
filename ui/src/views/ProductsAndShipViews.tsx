@@ -799,6 +799,9 @@ export const ReadyToShipView: React.FC<{
                   <span>Revenue: {fmtUsd(ord.total_revenue_cents)}</span>
                   <span>Net profit: {fmtUsd(ord.net_profit_cents)} ({ord.margin_pct}%)</span>
                 </div>
+                {ord.packaging_cost_set === false && (
+                  <div style={{ fontSize: 11, opacity: 0.6 }}>Estimate: packaging cost not set</div>
+                )}
 
                 <button type="button" className="fp-btn fp-btn-primary" onClick={() => setShipping(ord)}>
                   Mark shipped…

@@ -198,6 +198,12 @@ pub struct Order {
     pub margin_pct: f64,
     pub has_margin_warning: bool,
     pub margin_warning_note: Option<String>,
+    /// Optional ship-by date (`YYYY-MM-DD`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ship_by: Option<String>,
+    /// False when the shop's packaging cost isn't set (the estimate counts it as 0).
+    #[serde(default)]
+    pub packaging_cost_set: bool,
     /// Ship fields (`ship_status`, `tracking_number`, ...), flattened like the shop payload.
     #[serde(flatten)]
     pub ship: OrderShipFields,
@@ -653,6 +659,14 @@ pub struct ShopSettings {
     // Costs
     pub default_electricity_cost_per_hr_cents: i64,
     pub min_margin_warning_pct: f64,
+    /// Packaging cost per order (box, filler, label), in cents. `None` = not set: margin
+    /// estimates count it as 0 and say so. No built-in default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packaging_cost_cents: Option<i64>,
+    /// Default days from order to ship, for on-time rate when an order has no ship-by
+    /// date. `None` = no target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_target_days: Option<u32>,
     // Store
     pub store_url: String,
     pub supabase_url: String,

@@ -125,6 +125,10 @@ export interface Order {
   margin_pct: number;
   has_margin_warning: boolean;
   margin_warning_note: string | null;
+  /** Optional ship-by date (YYYY-MM-DD); absent when not set. */
+  ship_by?: string | null;
+  /** False when the shop's packaging cost is blank (estimates count it as 0). */
+  packaging_cost_set?: boolean;
   lines: OrderLine[];
 }
 
@@ -359,6 +363,10 @@ export interface ShopSettings {
   slicer_app_path: string;
   default_electricity_cost_per_hr_cents: number;
   min_margin_warning_pct: number;
+  /** Packaging cost per order in cents. Absent/null = not set (counted as 0 in estimates). */
+  packaging_cost_cents?: number | null;
+  /** Default days from order to ship for on-time rate. Absent/null = no target. */
+  default_target_days?: number | null;
   store_url: string;
   supabase_url: string;
   supabase_anon_key: string;
