@@ -101,6 +101,23 @@ export interface InscriptionStudioConfig {
   rotationDeg: number;
   mirrorX: boolean;
   upsideDown: boolean;
+  /** When true (the default), preview letters follow the target part's surface. */
+  wrapOnSurface?: boolean;
+  align?: "left" | "center" | "right";
+  /** Optional saved pose in model millimetres. Inferred from the target part when omitted. */
+  origin?: [number, number, number];
+  normal?: [number, number, number];
+  tangent?: [number, number, number];
+  /** Saved 2D inscription area (four 0–1 points, typically TL, TR, BR, BL) from the shop or a baked view. */
+  quad?: number[][];
+  placement?: {
+    origin?: [number, number, number];
+    normal?: [number, number, number];
+    tangent?: [number, number, number];
+    wrapOnSurface?: boolean;
+    align?: "left" | "center" | "right";
+    quad?: number[][];
+  };
 }
 
 export interface CreatedCatalogProductPayload {

@@ -825,7 +825,9 @@ export const NewOrderSheet: React.FC<{
               justifyContent: "center",
               flex: "none",
             }}>
-              {/* 3D order builder: turn the model, click a part to set its filament; the view is this order's picture. */}
+              {/* 3D order builder: turn the model, click a part to set its filament; the view is this order's picture.
+                  inscription={activeLine.customText} is a small wiring change so New Order and Edit Order
+                  both show the line's text on the model (preview only; Print! / .3mf are unchanged). */}
               <OrderViewport3D
                 key={`${camKey(activeLine)}${viewWaitsForSaved ? ":loading" : ""}`}
                 ref={orderViewportRef}
@@ -839,6 +841,7 @@ export const NewOrderSheet: React.FC<{
                 }}
                 initialCamera={lineCamerasRef.current[camKey(activeLine)] ?? savedCamera ?? null}
                 onCameraChange={(cam) => { lineCamerasRef.current[camKey(activeLine)] = cam; }}
+                inscription={showInscription ? activeLine.customText : undefined}
                 fallback={
                   <ProductCompositeThumb productIdOrName={product.id} parts={compositeFor(activeLine)} size={Math.max(430, previewBox - 10)} liveTint
                     inscriptionText={showInscription ? activeLine.customText : null} />
