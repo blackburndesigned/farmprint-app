@@ -392,14 +392,24 @@ body.fp-wall-mode .fp-sidebar { display: none; }
   .fp-kitting-print-sheet .fp-kitting-card {
     padding: 0 !important;
   }
+  /* Block flow, not flex: WebKit's print ignores break-inside on flex items and slices a
+     flex column wherever the page ends, cutting product blocks (and their pictures) in half. */
+  .fp-kitting-print-sheet .fp-kitting-card,
   .fp-kitting-print-sheet .fp-kitting-lines {
-    gap: 10px !important;
+    display: block !important;
   }
-  /* A long order flows onto more pages a whole line block at a time. */
+  /* A long order flows onto more pages a whole product block at a time; a product longer
+     than a page is already split into "(continued)" blocks that start a new page
+     (kittingPages.ts). */
   .fp-kitting-print-sheet .fp-kitting-line {
     padding: 10px 12px !important;
+    margin: 0 0 10px 0;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+  .fp-kitting-print-sheet .fp-kitting-line[data-kitting-new-page] {
+    break-before: page;
+    page-break-before: always;
   }
   .fp-kitting-print-sheet .fp-kitting-footer {
     margin-top: 10px !important;

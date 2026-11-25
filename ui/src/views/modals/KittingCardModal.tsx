@@ -9,6 +9,7 @@ import { LineCompositeThumb } from "../shared";
 import { OrderLinePicture } from "../../orderLineThumbs";
 import { Printer } from "lucide-react";
 import { Icon } from "../../icons";
+import { KittingBlock, kittingBlocks } from "./kittingPages";
 
 /**
  * Kitting card picture for one order line: the full product as ordered, in the line's colors.
@@ -355,7 +356,7 @@ export const KittingCardModal: React.FC<{
           the app shell and this fixed overlay (see the @media print rules in index.css). */}
       {createPortal(
         <div className="fp-kitting-print-sheet" ref={sheetRef}>
-          <KittingCards orders={orders} sizes={KITTING_SIZES.print} />
+          <KittingCards orders={orders} sizes={KITTING_SIZES.print} paginate />
         </div>,
         document.body
       )}
@@ -376,13 +377,112 @@ const KITTING_SIZES = {
 };
 type KittingSizes = (typeof KITTING_SIZES)["print"];
 
+/** The part rows a line shows on the card (picture-only parts are left off). */
+function cardUnits(line: OrderLine): PartUnit[] {
+  return line.units.filter((u) => !isThumbnailOnlyUnit(u));
+}
+
+/**
+ * The card's product blocks. On screen each line is one block; the print copy is split into
+ * page-sized blocks (see kittingPages.ts) so no product is cut off at a page edge.
+ */
+function cardBlocks(ord: Order, z: KittingSizes, paginate: boolean): KittingBlock[] {
+  if (!paginate) {
+    return ord.lines.map((line, i) => ({ line: i, start: 0, end: cardUnits(line).length, continued: false, newPage: false }));
+  }
+  // Top of the first page: logo, customer and order code, and the notes (about 90 characters
+  // a line at the print size).
+  const notesLines = ord.notes ? Math.ceil((ord.notes.length + 8) / 90) : 0;
+  const header =
+    44 + Math.ceil(z.name * 1.15) + Math.ceil(z.meta * 1.25) + 2 + 10 + 2 + 12 +
+    (notesLines > 0 ? notesLines * Math.ceil(z.notes * 1.25) + 12 + 2 + 12 : 0);
+  return kittingBlocks(
+    ord.lines.map((line) => ({ units: cardUnits(line).length, hasCustomText: !!line.custom_text })),
+    z,
+    header
+  );
+}
+
+/**
+ * One product block: the line's picture, title and part rows, or for a later block of a
+ * product too long for one page, a "(continued)" header and the rest of its rows.
+ */
+const KittingLineBlock: React.FC<{ order: Order; block: KittingBlock; z: KittingSizes }> = ({ order: ord, block, z }) => {
+  const line = ord.lines[block.line];
+  const units = cardUnits(line).slice(block.start, block.end);
+  const besideCount = block.continued ? 0 : z.beside;
+  const title = (
+    <div
+      style={{
+        fontSize: z.title,
+        fontWeight: 800,
+        marginBottom: 4,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <span>
+        #{block.line + 1} · {line.quantity}× {line.product_name}
+        {block.continued && <span style={{ fontWeight: 600, color: "#475569" }}> (continued)</span>}
+      </span>
+      {block.continued ? (
+        <span style={{ fontSize: z.meta, fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>
+          {ord.customer_name} · {ord.order_code}
+        </span>
+      ) : (
+        line.custom_text && <span style={{ color: "#0284c7" }}>“{line.custom_text}”</span>
+      )}
+    </div>
+  );
+  return (
+    <div
+      className={block.continued ? "fp-kitting-line fp-kitting-line-continued" : "fp-kitting-line"}
+      data-kitting-new-page={block.newPage ? "" : undefined}
+      style={{
+        border: "1px solid #cbd5e1",
+        borderRadius: 8,
+        padding: "8px 10px",
+      }}
+    >
+      {block.continued ? (
+        title
+      ) : (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+          {/* The product as ordered, left of the line title and its first parts. */}
+          <KittingLinePicture order={ord} line={line} size={z.picture} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {title}
+            {units.slice(0, besideCount).map((u) => (
+              <KittingUnitRow key={u.id} unit={u} z={z} />
+            ))}
+          </div>
+        </div>
+      )}
+      {units.length > besideCount && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+            columnGap: 12,
+            marginTop: 2,
+          }}
+        >
+          {units.slice(besideCount).map((u) => (
+            <KittingUnitRow key={u.id} unit={u} z={z} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** The kitting card faces, one per order (the preview and the print sheet both draw these). */
-const KittingCards: React.FC<{ orders: Order[]; sizes: KittingSizes }> = ({ orders, sizes: z }) => (
+const KittingCards: React.FC<{ orders: Order[]; sizes: KittingSizes; paginate?: boolean }> = ({ orders, sizes: z, paginate = false }) => (
         <>
           {orders.map((ord) => {
-            const trackedUnits = ord.lines
-              .flatMap((l) => l.units)
-              .filter((u) => !isThumbnailOnlyUnit(u));
+            const trackedUnits = ord.lines.flatMap(cardUnits);
             return (
               <div
                 key={ord.id}
@@ -470,66 +570,9 @@ const KittingCards: React.FC<{ orders: Order[]; sizes: KittingSizes }> = ({ orde
                   )}
 
                   <div className="fp-kitting-lines" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {ord.lines.map((line, idx) => {
-                      const units = line.units.filter(
-                        (u) => !isThumbnailOnlyUnit(u)
-                      );
-                      return (
-                        <div
-                          key={line.id}
-                          className="fp-kitting-line"
-                          style={{
-                            border: "1px solid #cbd5e1",
-                            borderRadius: 8,
-                            padding: "8px 10px",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-                            {/* The product as ordered, left of the line title and its first parts. */}
-                            <KittingLinePicture order={ord} line={line} size={z.picture} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: z.title,
-                                  fontWeight: 800,
-                                  marginBottom: 4,
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  gap: 8,
-                                }}
-                              >
-                                <span>
-                                  #{idx + 1} · {line.quantity}× {line.product_name}
-                                </span>
-                                {line.custom_text && (
-                                  <span style={{ color: "#0284c7" }}>
-                                    “{line.custom_text}”
-                                  </span>
-                                )}
-                              </div>
-                              {units.slice(0, z.beside).map((u) => (
-                                <KittingUnitRow key={u.id} unit={u} z={z} />
-                              ))}
-                            </div>
-                          </div>
-                          {units.length > z.beside && (
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-                                columnGap: 12,
-                                marginTop: 2,
-                              }}
-                            >
-                              {units.slice(z.beside).map((u) => (
-                                <KittingUnitRow key={u.id} unit={u} z={z} />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {cardBlocks(ord, z, paginate).map((blk) => (
+                      <KittingLineBlock key={`${blk.line}:${blk.start}`} order={ord} block={blk} z={z} />
+                    ))}
                   </div>
                 </div>
 
