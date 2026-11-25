@@ -185,7 +185,7 @@ export function tangentFacingCamera(normal: Vec3, viewDirection: Vec3, viewUp: V
 }
 
 function applyFieldBasis(normal: Vec3, tangent: Vec3, rotationDeg: number): { normal: Vec3; tangent: Vec3 } {
-  let n = normalize(normal);
+  const n = normalize(normal);
   let t = normalize(tangent);
   t = sub(t, scale(n, dot(t, n)));
   if (vlen(t) < 1e-8) t = tangentFacingCamera(n, n, [0, 0, 1]);
