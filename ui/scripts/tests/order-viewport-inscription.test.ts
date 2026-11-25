@@ -4,16 +4,21 @@ import {
   CHAR_ASPECT,
   INSCRIPTION_PREVIEW_ID,
   buildInscriptionPreviewMesh,
+  fieldBlockedByOtherParts,
   fitRange,
   hasInscriptionSetup,
   inscriptionFromSaved,
   layoutMask,
   letterHeightMm,
+  parseInscriptionQuad,
   previewInscriptionText,
+  resolveInscriptionPlacement,
   wrapStrip,
   inscriptionPreviewHex,
+  cameraEye,
   type PreviewPart,
 } from "../../src/inscriptionPreview";
+import { boundsOfParts } from "../../src/viewportCamera";
 import { check, done } from "./check";
 
 function boxPart(id = "body", name = "Body", size = 40): PreviewPart {
@@ -188,5 +193,108 @@ check(fitTall.v0 === 0 && fitTall.v1 === 1 && fitTall.u0 > 0 && fitTall.u1 < 1, 
 check(inscriptionPreviewHex({ surfaceHex: "#FF7A00" }) === "#1a1a1a", "letters on a light/saturated surface are dark");
 check(inscriptionPreviewHex({ surfaceHex: "#1a1a1a" }) === "#f4f4f4", "letters on a dark surface are light");
 check(inscriptionPreviewHex({ surfaceHex: "#FF7A00", letterHex: "#FF7A00" }) === "#1a1a1a", "a letter color that matches the surface is replaced with a contrast color");
+
+function aabbPart(
+  id: string,
+  name: string,
+  min: [number, number, number],
+  max: [number, number, number],
+): PreviewPart {
+  const [x0, y0, z0] = min;
+  const [x1, y1, z1] = max;
+  const positions = [
+    x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0,
+    x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1,
+  ];
+  const indices = [
+    0, 2, 1, 0, 3, 2,
+    4, 5, 6, 4, 6, 7,
+    0, 1, 5, 0, 5, 4,
+    3, 7, 6, 3, 6, 2,
+    0, 4, 7, 0, 7, 3,
+    1, 2, 6, 1, 6, 5,
+  ];
+  return { id, name, positions, indices, visible: true };
+}
+
+// Open tray: large floor with a divider over the front and center, leaving a clear back bay.
+const trayFloor = aabbPart("tray", "Tray", [-50, -80, 0], [50, 80, 2]);
+const trayDivider = aabbPart("divider", "Divider", [-48, -78, 2], [48, 30, 25]);
+const trayParts = [trayFloor, trayDivider];
+const trayBounds = boundsOfParts(trayParts.map((p) => ({ visible: true, meshPositions: p.positions })));
+const trayEye = cameraEye(camera, trayBounds);
+const blockedCenter = {
+  origin: [0, 0, 2] as [number, number, number],
+  normal: [0, 0, 1] as [number, number, number],
+  tangent: [1, 0, 0] as [number, number, number],
+  partId: "tray",
+  widthMm: 40,
+  heightMm: 10,
+  wrapOnSurface: false,
+  align: "center" as const,
+  rotationDeg: 0,
+  mirrorX: false,
+  upsideDown: false,
+  fontFamily: "Arial",
+  depthMm: 0.8,
+  maxChars: 14,
+};
+check(
+  fieldBlockedByOtherParts(blockedCenter, trayEye, [trayDivider]) === true,
+  "a field under another part is reported as blocked from the camera",
+);
+
+const trayConfig = {
+  ...enabled,
+  targetPartName: "Tray",
+  areaWidthMm: 40,
+  areaHeightMm: 10,
+};
+const clearPlacement = resolveInscriptionPlacement({ config: trayConfig, parts: trayParts, camera });
+check(!!clearPlacement, "inference still finds a placement when the facing center is blocked");
+check(clearPlacement!.partId === "tray", "inferred placement stays on the target part");
+check(
+  fieldBlockedByOtherParts(clearPlacement!, trayEye, [trayDivider]) === false,
+  "inferred placement is not hidden by another part",
+);
+const ysClear = [clearPlacement!.origin[1]];
+const onFrontWall = clearPlacement!.origin[1] < -70 && clearPlacement!.normal[1] < -0.5;
+const inClearBay = clearPlacement!.origin[1] > 30;
+check(onFrontWall || inClearBay, "inferred placement sits on the clear floor bay or the outer front wall");
+check(clearPlacement!.widthMm <= 40 + 1e-6 && clearPlacement!.heightMm <= 10 + 1e-6, "inferred field does not grow past the requested size");
+check(clearPlacement!.widthMm >= 40 * 0.25 && clearPlacement!.heightMm >= 10 * 0.25, "inferred field stays large enough to read");
+
+const trayMesh = buildInscriptionPreviewMesh({
+  text: "HELLO",
+  config: trayConfig,
+  supportsCustomText: true,
+  parts: trayParts,
+  camera,
+  mask: layoutMask("HELLO"),
+});
+check(!!trayMesh, "blocked-center tray still builds a preview mesh");
+const letterY = trayMesh!.mesh.positions.filter((_, i) => i % 3 === 1);
+const letterMinY = Math.min(...letterY);
+const letterMaxY = Math.max(...letterY);
+const overlapsDivider = letterMinY < 30 - 0.2 && letterMaxY > -78 + 0.2 && !onFrontWall;
+check(!overlapsDivider || onFrontWall, "preview letters do not sit under the divider");
+
+check(parseInscriptionQuad([[0.2, 0.4], [0.8, 0.4], [0.8, 0.6], [0.2, 0.6]]) !== null, "a four-point 0–1 quad is accepted");
+check(parseInscriptionQuad([[0, 0], [1, 0], [1]]) === null, "an incomplete quad is rejected");
+
+// A saved 2D view quad is projected onto the matching surface instead of inferring a face.
+const frontCam = { ...camera, direction: [0, -1, 0] as [number, number, number], up: [0, 0, 1] as [number, number, number] };
+const cube = boxPart("body", "Body", 40);
+const mapped = resolveInscriptionPlacement({
+  config: {
+    ...enabled,
+    quad: [[0.35, 0.42], [0.65, 0.42], [0.65, 0.58], [0.35, 0.58]],
+  },
+  parts: [cube],
+  camera: frontCam,
+});
+check(!!mapped, "a saved 2D inscription quad maps onto the model");
+check(mapped!.origin[1] < -10, "the mapped quad lands on the visible front face, not an inferred top");
+
 done();
 

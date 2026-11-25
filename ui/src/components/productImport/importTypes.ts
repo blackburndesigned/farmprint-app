@@ -108,12 +108,15 @@ export interface InscriptionStudioConfig {
   origin?: [number, number, number];
   normal?: [number, number, number];
   tangent?: [number, number, number];
+  /** Saved 2D inscription area (four 0–1 points, typically TL, TR, BR, BL) from the shop or a baked view. */
+  quad?: number[][];
   placement?: {
     origin?: [number, number, number];
     normal?: [number, number, number];
     tangent?: [number, number, number];
     wrapOnSurface?: boolean;
     align?: "left" | "center" | "right";
+    quad?: number[][];
   };
 }
 

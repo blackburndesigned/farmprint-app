@@ -3,8 +3,10 @@
  *
  * Uses the product's saved inscription setup (editor.json): target part, area size,
  * font, rotation, flips, optional wrap-on-surface, and an optional saved pose
- * (origin / normal / tangent). When no pose is stored, the text is placed on the
- * camera-facing region of the target part.
+ * (origin / normal / tangent). A saved 2D view quad is projected onto the
+ * matching visible surface. When no pose is stored, the text is placed on a
+ * large camera-facing region that other parts do not hide, scaled to stay on
+ * that surface.
  *
  * The mesh is a preview in the live viewport only. It is never written into a
  * Print! plate or an exported .3mf.
@@ -14,8 +16,8 @@
  * plane at the saved (or inferred) pose.
  */
 import type { InscriptionStudioConfig } from "./components/productImport/importTypes";
-import type { CameraState, Vec3 } from "./viewportCamera";
-import { add, cross, dot, normalize, rotate, scale, sub, vlen } from "./viewportCamera";
+import type { Bounds, CameraState, Vec3 } from "./viewportCamera";
+import { add, BASE_MARGIN, boundsOfParts, cross, dot, lookAtBasis, normalize, rotate, scale, sub, vlen } from "./viewportCamera";
 
 /** Reserved part id for the preview mesh. Not a catalog part. */
 export const INSCRIPTION_PREVIEW_ID = "__order_inscription_preview";
@@ -109,6 +111,21 @@ function readAlign(raw: unknown): InscriptionAlign {
   return "center";
 }
 
+/** Four 0–1 image-space points (typically top-left, top-right, bottom-right, bottom-left). */
+export type InscriptionQuad = [[number, number], [number, number], [number, number], [number, number]];
+
+export function parseInscriptionQuad(raw: unknown): InscriptionQuad | null {
+  if (!Array.isArray(raw) || raw.length !== 4) return null;
+  const pts: [number, number][] = [];
+  for (const pair of raw) {
+    const x = Number(Array.isArray(pair) ? pair[0] : (pair as { x?: unknown })?.x);
+    const y = Number(Array.isArray(pair) ? pair[1] : (pair as { y?: unknown })?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    pts.push([Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))]);
+  }
+  return pts as InscriptionQuad;
+}
+
 /**
  * Normalizes a saved editor.json inscription block, including optional pose fields
  * (top-level or under `placement`) so older and newer saves both load.
@@ -134,6 +151,7 @@ export function inscriptionFromSaved(raw: InscriptionStudioConfig | Record<strin
     origin: finiteVec3(placement.origin) ?? undefined,
     normal: finiteVec3(placement.normal) ?? undefined,
     tangent: finiteVec3(placement.tangent) ?? undefined,
+    quad: parseInscriptionQuad(placement.quad ?? r.quad ?? r.storeInscriptionQuad ?? r.store_inscription_quad) ?? undefined,
   };
 }
 
@@ -302,6 +320,319 @@ function closestPointOnTriangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3): Vec3 {
   return add(add(scale(a, 1 - vb * denom - vc * denom), scale(b, vb * denom)), scale(c, vc * denom));
 }
 
+
+const LENS_FOV = 32;
+const HALF_LENS = (LENS_FOV * Math.PI) / 360;
+const OCCLUSION_EPS = 0.5;
+const ON_SURFACE_MM = 3;
+const MIN_FIT_SCALE = 0.25;
+const FACE_NORMAL_DOT = 0.9;
+const FACE_PLANE_MM = 2.5;
+
+/** Eye position for a square 32° lens, matching the order viewport. */
+export function cameraEye(camera: CameraState, bounds: Bounds | null): Vec3 {
+  const f = normalize(camera.direction);
+  if (!bounds) return scale(f, 80);
+  const center: Vec3 = [
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2,
+  ];
+  const ext = sub(bounds.max, bounds.min);
+  const radius = Math.max(1e-3, Math.hypot(ext[0], ext[1], ext[2]) * 0.5);
+  const dist = (radius * BASE_MARGIN * (camera.zoom || 1)) / Math.sin(HALF_LENS);
+  const pan = camera.pan || [0, 0, 0];
+  const target: Vec3 = [center[0] + pan[0], center[1] + pan[1], center[2] + pan[2]];
+  return add(target, scale(f, dist));
+}
+
+function imageRayDirection(u: number, v: number, camera: CameraState): Vec3 {
+  const t = Math.tan(HALF_LENS);
+  const nx = (2 * u - 1) * t;
+  const ny = (1 - 2 * v) * t;
+  const f = normalize(camera.direction);
+  const basis = lookAtBasis(f, camera.up);
+  return normalize([
+    basis.right[0] * nx + basis.up[0] * ny - f[0],
+    basis.right[1] * nx + basis.up[1] * ny - f[1],
+    basis.right[2] * nx + basis.up[2] * ny - f[2],
+  ]);
+}
+
+interface FaceCluster {
+  normal: Vec3;
+  origin: Vec3;
+  area: number;
+  facing: number;
+  minU: number;
+  maxU: number;
+  minV: number;
+  maxV: number;
+  tangent: Vec3;
+  bitangent: Vec3;
+}
+
+function clusterFacingFaces(
+  positions: ArrayLike<number>,
+  indices: ArrayLike<number>,
+  viewDirection: Vec3,
+  viewUp: Vec3,
+): FaceCluster[] {
+  const view = normalize(viewDirection);
+  const nTri = Math.floor(indices.length / 3);
+  const clusters: { n: Vec3; offset: number; area: number; cx: number; cy: number; cz: number; pts: Vec3[] }[] = [];
+  for (let t = 0; t < nTri; t++) {
+    const i0 = indices[t * 3] * 3, i1 = indices[t * 3 + 1] * 3, i2 = indices[t * 3 + 2] * 3;
+    if (Math.max(i0, i1, i2) + 2 >= positions.length) continue;
+    const tri = triNormalArea(positions, i0, i1, i2);
+    if (!tri || dot(tri.n, view) <= 0.12) continue;
+    const offset = dot(tri.n, tri.c);
+    let cluster = clusters.find((c) => dot(c.n, tri.n) >= FACE_NORMAL_DOT && Math.abs(c.offset - offset) <= FACE_PLANE_MM);
+    if (!cluster) {
+      cluster = { n: [...tri.n] as Vec3, offset, area: 0, cx: 0, cy: 0, cz: 0, pts: [] };
+      clusters.push(cluster);
+    }
+    cluster.area += tri.area;
+    cluster.cx += tri.c[0] * tri.area;
+    cluster.cy += tri.c[1] * tri.area;
+    cluster.cz += tri.c[2] * tri.area;
+    cluster.n = normalize([
+      cluster.n[0] + tri.n[0] * tri.area,
+      cluster.n[1] + tri.n[1] * tri.area,
+      cluster.n[2] + tri.n[2] * tri.area,
+    ]);
+    cluster.offset = (cluster.offset * (cluster.area - tri.area) + offset * tri.area) / cluster.area;
+    const a: Vec3 = [positions[i0], positions[i0 + 1], positions[i0 + 2]];
+    const b: Vec3 = [positions[i1], positions[i1 + 1], positions[i1 + 2]];
+    const c: Vec3 = [positions[i2], positions[i2 + 1], positions[i2 + 2]];
+    cluster.pts.push(a, b, c);
+  }
+  const faces: FaceCluster[] = [];
+  for (const cluster of clusters) {
+    if (cluster.area < 1) continue;
+    const origin: Vec3 = [cluster.cx / cluster.area, cluster.cy / cluster.area, cluster.cz / cluster.area];
+    const normal = facingNormal(cluster.n, view);
+    let tangent = tangentFacingCamera(normal, view, viewUp);
+    const right = tangentFacingCamera(normal, view, viewUp);
+    if (dot(tangent, right) < 0) tangent = scale(tangent, -1);
+    const bitangent = normalize(cross(normal, tangent));
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+    for (const p of cluster.pts) {
+      const rel = sub(p, origin);
+      const u = dot(rel, tangent);
+      const v = dot(rel, bitangent);
+      if (u < minU) minU = u;
+      if (u > maxU) maxU = u;
+      if (v < minV) minV = v;
+      if (v > maxV) maxV = v;
+    }
+    faces.push({
+      normal, origin, area: cluster.area, facing: Math.max(0, dot(normal, view)),
+      minU, maxU, minV, maxV, tangent, bitangent,
+    });
+  }
+  faces.sort((a, b) => b.area * (0.5 + b.facing) - a.area * (0.5 + a.facing));
+  return faces;
+}
+
+export function fieldSamplePoints(placement: InscriptionPlacement, nu = 5, nv = 3): Vec3[] {
+  const n = normalize(placement.normal);
+  let t = normalize(placement.tangent);
+  if (placement.mirrorX) t = scale(t, -1);
+  let b = cross(n, t);
+  if (vlen(b) < 1e-8) b = [0, 0, 1];
+  b = normalize(b);
+  if (placement.upsideDown) b = scale(b, -1);
+  const hw = placement.widthMm * 0.5;
+  const hh = placement.heightMm * 0.5;
+  const out: Vec3[] = [];
+  for (let iv = 0; iv < nv; iv++) {
+    const v = nv === 1 ? 0 : (iv / (nv - 1)) * 2 - 1;
+    for (let iu = 0; iu < nu; iu++) {
+      const u = nu === 1 ? 0 : (iu / (nu - 1)) * 2 - 1;
+      out.push(add(add(placement.origin, scale(t, u * hw)), scale(b, v * hh)));
+    }
+  }
+  return out;
+}
+
+/** True when another part lies between the camera and any sample on the text field. */
+export function fieldBlockedByOtherParts(
+  placement: InscriptionPlacement,
+  eye: Vec3,
+  occluders: PreviewPart[],
+): boolean {
+  if (!occluders.length) return false;
+  for (const p of fieldSamplePoints(placement)) {
+    const rel = sub(p, eye);
+    const dist = vlen(rel);
+    if (dist < 1e-4) continue;
+    const dir = scale(rel, 1 / dist);
+    const max = dist - OCCLUSION_EPS;
+    if (max <= 1e-4) continue;
+    for (const other of occluders) {
+      if ((other.indices?.length || 0) < 3) continue;
+      const hit = raycastMesh(eye, dir, other.positions, other.indices, max);
+      if (hit) return true;
+    }
+  }
+  return false;
+}
+
+/** True when every field corner (and mid-edge) still sits on the target surface. */
+export function fieldFitsOnTarget(placement: InscriptionPlacement, target: PreviewPart): boolean {
+  const n = normalize(placement.normal);
+  for (const p of fieldSamplePoints(placement, 3, 3)) {
+    const start = add(p, scale(n, ON_SURFACE_MM));
+    const hit = raycastMesh(start, scale(n, -1), target.positions, target.indices, ON_SURFACE_MM * 2 + 1);
+    if (!hit) return false;
+    if (dot(normalize(hit.normal), n) < 0.45) return false;
+  }
+  return true;
+}
+
+function placementSize(
+  base: Omit<InscriptionPlacement, "widthMm" | "heightMm">,
+  widthMm: number,
+  heightMm: number,
+): InscriptionPlacement {
+  return { ...base, widthMm, heightMm };
+}
+
+function fitScale(
+  base: Omit<InscriptionPlacement, "widthMm" | "heightMm">,
+  widthMm: number,
+  heightMm: number,
+  target: PreviewPart,
+  occluders: PreviewPart[],
+  eye: Vec3,
+): number {
+  const ok = (s: number) => {
+    const p = placementSize(base, widthMm * s, heightMm * s);
+    return fieldFitsOnTarget(p, target) && !fieldBlockedByOtherParts(p, eye, occluders);
+  };
+  if (ok(1)) return 1;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 10; i++) {
+    const mid = (lo + hi) / 2;
+    if (ok(mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo >= MIN_FIT_SCALE ? lo : 0;
+}
+
+/**
+ * Project a saved 2D inscription quad (shop / baked view, 0–1 image space) through
+ * the product picture camera onto the target part.
+ */
+export function placementFromImageQuad(
+  quad: InscriptionQuad,
+  camera: CameraState,
+  eye: Vec3,
+  target: PreviewPart,
+  maxDist: number,
+): { origin: Vec3; normal: Vec3; tangent: Vec3; widthMm: number; heightMm: number } | null {
+  const hits: { point: Vec3; normal: Vec3 }[] = [];
+  for (const [u, v] of quad) {
+    const dir = imageRayDirection(u, v, camera);
+    const hit = raycastMesh(eye, dir, target.positions, target.indices, maxDist);
+    if (hit) hits.push(hit);
+  }
+  if (hits.length < 3) return null;
+  const origin = hits.reduce((acc, h) => add(acc, scale(h.point, 1 / hits.length)), [0, 0, 0] as Vec3);
+  let normal = normalize(hits.reduce((acc, h) => add(acc, h.normal), [0, 0, 0] as Vec3));
+  const view = normalize(camera.direction);
+  normal = facingNormal(normal, view);
+  // Quad order: TL, TR, BR, BL. Width follows the top edge when present.
+  const tl = hits[0]?.point;
+  const tr = hits[1]?.point ?? hits[0]?.point;
+  let tangent = tl && tr ? sub(tr, tl) : tangentFacingCamera(normal, view, camera.up);
+  tangent = sub(tangent, scale(normal, dot(tangent, normal)));
+  if (vlen(tangent) < 1e-8) tangent = tangentFacingCamera(normal, view, camera.up);
+  tangent = normalize(tangent);
+  const widthMm = tl && tr ? Math.max(MIN_WIDTH_MM, vlen(sub(tr, tl))) : MIN_WIDTH_MM;
+  const bl = hits[3]?.point ?? hits[hits.length - 1]?.point;
+  const heightMm = tl && bl
+    ? Math.max(MIN_HEIGHT_MM, vlen(sub(sub(bl, tl), scale(tangent, dot(sub(bl, tl), tangent)))))
+    : MIN_HEIGHT_MM;
+  return { origin, normal, tangent, widthMm, heightMm };
+}
+
+function inferUnobstructedPlacement(
+  target: PreviewPart,
+  occluders: PreviewPart[],
+  camera: CameraState,
+  eye: Vec3,
+  widthMm: number,
+  heightMm: number,
+  extras: Omit<InscriptionPlacement, "origin" | "normal" | "tangent" | "widthMm" | "heightMm" | "partId">,
+): { origin: Vec3; normal: Vec3; tangent: Vec3; widthMm: number; heightMm: number } | null {
+  const view = normalize(camera.direction);
+  const up = normalize(camera.up);
+  const faces = clusterFacingFaces(target.positions, target.indices, view, up);
+  let best: { score: number; origin: Vec3; normal: Vec3; tangent: Vec3; widthMm: number; heightMm: number } | null = null;
+  const grid = 9;
+  for (const face of faces) {
+    const spanU = face.maxU - face.minU;
+    const spanV = face.maxV - face.minV;
+    if (spanU < MIN_WIDTH_MM || spanV < MIN_HEIGHT_MM) continue;
+    const marginU = Math.min(spanU * 0.08, widthMm * 0.15);
+    const marginV = Math.min(spanV * 0.08, heightMm * 0.15);
+    const u0 = face.minU + marginU, u1 = face.maxU - marginU;
+    const v0 = face.minV + marginV, v1 = face.maxV - marginV;
+    if (u1 <= u0 || v1 <= v0) continue;
+    for (let iv = 0; iv < grid; iv++) {
+      const fv = iv / (grid - 1);
+      for (let iu = 0; iu < grid; iu++) {
+        const fu = iu / (grid - 1);
+        const u = u0 + (u1 - u0) * fu;
+        const v = v0 + (v1 - v0) * fv;
+        const guess = add(add(face.origin, scale(face.tangent, u)), scale(face.bitangent, v));
+        const start = add(guess, scale(face.normal, ON_SURFACE_MM * 2));
+        const snapped = raycastMesh(start, scale(face.normal, -1), target.positions, target.indices, ON_SURFACE_MM * 4);
+        if (!snapped || dot(normalize(snapped.normal), face.normal) < 0.5) continue;
+        const origin = snapped.point;
+        let tangent = face.tangent;
+        const right = tangentFacingCamera(face.normal, view, up);
+        if (dot(tangent, right) < 0) tangent = scale(tangent, -1);
+        const base = {
+          origin,
+          normal: face.normal,
+          tangent,
+          partId: target.id,
+          wrapOnSurface: extras.wrapOnSurface,
+          align: extras.align,
+          rotationDeg: extras.rotationDeg,
+          mirrorX: extras.mirrorX,
+          upsideDown: extras.upsideDown,
+          fontFamily: extras.fontFamily,
+          depthMm: extras.depthMm,
+          maxChars: extras.maxChars,
+        };
+        const scaleFit = fitScale(base, widthMm, heightMm, target, occluders, eye);
+        if (scaleFit <= 0) continue;
+        const dist = vlen(sub(eye, origin));
+        const score = scaleFit * 1000 + face.facing * 20 + face.area * 0.001 - dist * 0.01;
+        if (!best || score > best.score) {
+          best = {
+            score,
+            origin,
+            normal: face.normal,
+            tangent,
+            widthMm: widthMm * scaleFit,
+            heightMm: heightMm * scaleFit,
+          };
+        }
+        if (scaleFit >= 0.999 && best && best.score > 1000) {
+          // Full-size clear region on a large facing face is good enough.
+          if (face === faces[0] || best.widthMm >= widthMm * 0.99) return best;
+        }
+      }
+    }
+  }
+  return best;
+}
+
 export function resolveInscriptionPlacement(opts: {
   config: InscriptionStudioConfig;
   parts: PreviewPart[];
@@ -315,21 +646,62 @@ export function resolveInscriptionPlacement(opts: {
   const widthMm = Math.max(MIN_WIDTH_MM, cfg.areaWidthMm || 28);
   let heightMm = cfg.areaHeightMm || 0;
   if (heightMm < MIN_HEIGHT_MM) heightMm = Math.max(MIN_HEIGHT_MM, letterHeightMm(cfg.sampleText || "SAMPLE", widthMm) || 8);
+  heightMm = Math.max(MIN_HEIGHT_MM, heightMm);
+  const bounds = boundsOfParts(opts.parts.map((p) => ({ visible: p.visible !== false, meshPositions: p.positions })));
+  const eye = cameraEye(opts.camera, bounds);
+  const occluders = opts.parts.filter((p) => p.id !== part.id && p.visible !== false && (p.indices?.length || 0) >= 3);
+  const extras = {
+    wrapOnSurface: cfg.wrapOnSurface !== false,
+    align: cfg.align || "center" as InscriptionAlign,
+    rotationDeg: cfg.rotationDeg,
+    mirrorX: !!cfg.mirrorX,
+    upsideDown: !!cfg.upsideDown,
+    fontFamily: cfg.fontFamily || DEFAULT_FONT,
+    depthMm: Math.max(0, cfg.depthMm || 0),
+    maxChars: cfg.maxChars || 0,
+  };
+
   let origin = cfg.origin ?? null;
   let normal = cfg.normal ?? null;
   let tangent = cfg.tangent ?? null;
-  if (!origin || !normal) {
-    const inferred = dominantFacingPlacement(part.positions, part.indices, view, up);
-    if (!inferred) return null;
-    origin = origin ?? inferred.origin;
-    normal = normal ?? inferred.normal;
-    tangent = tangent ?? inferred.tangent;
+  let usedWidth = widthMm;
+  let usedHeight = heightMm;
+  const hasSavedPose = !!(origin && normal);
+  const quad = parseInscriptionQuad(cfg.quad);
+
+  if (!hasSavedPose && quad) {
+    const span = bounds ? Math.max(vlen(sub(bounds.max, bounds.min)) * 3, 50) : 400;
+    const mapped = placementFromImageQuad(quad, opts.camera, eye, part, span);
+    if (mapped) {
+      origin = mapped.origin;
+      normal = mapped.normal;
+      tangent = mapped.tangent;
+      usedWidth = mapped.widthMm;
+      usedHeight = mapped.heightMm;
+    }
   }
+
+  if (!origin || !normal) {
+    const inferred = inferUnobstructedPlacement(part, occluders, opts.camera, eye, widthMm, heightMm, extras);
+    if (inferred) {
+      origin = inferred.origin;
+      normal = inferred.normal;
+      tangent = inferred.tangent;
+      usedWidth = inferred.widthMm;
+      usedHeight = inferred.heightMm;
+    } else {
+      const fallback = dominantFacingPlacement(part.positions, part.indices, view, up);
+      if (!fallback) return null;
+      origin = fallback.origin;
+      normal = fallback.normal;
+      tangent = fallback.tangent;
+    }
+  }
+
   normal = facingNormal(normal, view);
   if (!tangent) tangent = tangentFacingCamera(normal, view, up);
   const basis = applyFieldBasis(normal, tangent, cfg.rotationDeg);
-  // When no pose was saved, keep letters reading left-to-right and right-way-up in the product picture.
-  if (!cfg.origin || !cfg.normal) {
+  if (!hasSavedPose) {
     const right = tangentFacingCamera(basis.normal, view, up);
     if (dot(basis.tangent, right) < 0) basis.tangent = scale(basis.tangent, -1);
   }
@@ -338,16 +710,9 @@ export function resolveInscriptionPlacement(opts: {
     normal: basis.normal,
     tangent: basis.tangent,
     partId: part.id,
-    widthMm,
-    heightMm: Math.max(MIN_HEIGHT_MM, heightMm),
-    wrapOnSurface: cfg.wrapOnSurface !== false,
-    align: cfg.align || "center",
-    rotationDeg: cfg.rotationDeg,
-    mirrorX: !!cfg.mirrorX,
-    upsideDown: !!cfg.upsideDown,
-    fontFamily: cfg.fontFamily || DEFAULT_FONT,
-    depthMm: Math.max(0, cfg.depthMm || 0),
-    maxChars: cfg.maxChars || 0,
+    widthMm: usedWidth,
+    heightMm: usedHeight,
+    ...extras,
   };
 }
 
